@@ -1,0 +1,50 @@
+# 12 October 2026 (A4): noise_path, a noise band whose centre follows four breakpoints and whose width moves from a
+# start to an end value over a duration, under a level envelope that rises to a peak at peak_pos and falls (whoosh,
+# swoosh, swipe, reverse). The best calibration chains layered two static noises to fake this motion. Gap measured by
+# the A3 calibration: swoosh, whoosh, swipe and reverse mel error 2.2 to 2.7 JND. Parameter categories: path (c0_hz,
+# c1_hz, c2_hz, c3_hz, bw0_oct, bw1_oct), shape (duration_s, peak_pos, shape_pow), level (amp_db, onset_s).
+# Derived from the mathematics, no code copied. FR : bande de bruit à trajectoire par points (centre et largeur).
+import torch
+
+from zrmd.audio import sfxdsp as D
+from zrmd.audio.bank import Block, db_to_amp
+
+META = D.meta("whoosh", "Noise path: a noise band whose centre follows four breakpoints and whose width moves, under a rise and fall envelope.",
+              ["whoosh", "swoosh", "swipe", "reverse", "noise", "air", "transition", "sweep"], "time-varying Gaussian band mask on fixed-seed noise, breakpoint trajectories")
+
+
+class NoisePath(Block):
+    ID = "noise_path"
+    FIT = {"screenSamples": 768, "scanPairs": [["c1_hz", "c2_hz"], ["duration_s", "peak_pos"], ["bw0_oct", "bw1_oct"]]}
+    PARAMS = [
+        D.param("c0_hz", "Hz", 80, 16000, 600, "log", "band centre at the start"),
+        D.param("c1_hz", "Hz", 80, 16000, 1500, "log", "band centre at one third"),
+        D.param("c2_hz", "Hz", 80, 16000, 3000, "log", "band centre at two thirds"),
+        D.param("c3_hz", "Hz", 80, 16000, 2000, "log", "band centre at the end"),
+        D.param("bw0_oct", "octaves", 0.2, 8.0, 1.5, "log", "band width at the start"),
+        D.param("bw1_oct", "octaves", 0.2, 8.0, 3.0, "log", "band width at the end"),
+        D.param("duration_s", "s", 0.03, 1.0, 0.35, "log", "length of the gesture"),
+        D.param("peak_pos", "fraction", 0.05, 0.95, 0.6, "lin", "where the level peaks"),
+        D.param("shape_pow", "exponent", 0.5, 4.0, 1.5, "log", "curvature of the rise and fall"),
+        D.AMP(-14.0), D.ONSET(0.25, 0.02),
+    ]
+
+    def synth(self, v, t, sr):
+        lc = [torch.log2(v[k]) for k in ("c0_hz", "c1_hz", "c2_hz", "c3_hz")]
+        lb = [torch.log(v["bw0_oct"]), torch.log(v["bw1_oct"])]
+
+        def mask(freqs, times):
+            c = D.breakpoints(times, v["onset_s"], v["duration_s"], lc)
+            bw = torch.exp(D.breakpoints(times, v["onset_s"], v["duration_s"], lb))
+            return torch.exp(-0.5 * ((D.log2f(freqs) - c) / (bw / D.FWHM)) ** 2)
+
+        y = D.moving(self.noise(t.shape[0], t.device), mask, sr)
+        # Smooth bell (no hard zero edges): rises to 1 at peak_pos, falls to 0 at the end, power-shaped sides.
+        x = torch.clamp((t - v["onset_s"]) / v["duration_s"], 0.0, 1.0)
+        up = torch.clamp(x / v["peak_pos"], 0.0, 1.0)
+        down = torch.clamp((1.0 - x) / (1.0 - v["peak_pos"]), 0.0, 1.0)
+        env = torch.pow(torch.minimum(up, down) + 1e-6, v["shape_pow"]) * D.gate(t, v["onset_s"])
+        return db_to_amp(v["amp_db"]) * y * env
+
+
+BLOCK = NoisePath

@@ -1,0 +1,57 @@
+# 12 October 2026: delay_echo, a feedback echo written as its first eight taps,
+#   H(w) = sum_k feedback**(k-1) L(w)**k exp(-j w k d),  d = time_s * sr (fractional, by phase),
+# L the RBJ lowpass magnitude at damp_hz (each repeat darker), mixed equal power. Exact up to the eighth repeat.
+# FR : écho à réinjection, huit répétitions, chacune plus sombre.
+import math
+
+import torch
+
+from zrmd.audio.bank import db_to_amp, stft_filter
+from zrmd.audio import fxdsp as F
+from zrmd.audio.fxdsp import EffectBlock
+from zrmd.audio.fxdsp import param as P
+
+META = {"family": "delay", "kind": "effect",
+        "description": "Feedback echo (time, feedback, per-repeat lowpass, mix), first eight repeats exact, fractional delay by phase. Echoes, slapback, dub throws. (12 October 2026)",
+        "tags": ["effect", "delay", "echo", "slapback", "feedback"],
+        "sources": [{"what": "feedback delay as a tap sum", "url": None, "licence": F.SOURCE}, F.RBJ],
+        "licence": "original"}
+TAPS = 8
+TAIL_S = 0.1
+
+
+class DelayEcho(EffectBlock):
+    ID = "delay_echo"
+    # 12 October 2026 (A2): fit hints measured on the failed cases of the first A2 verification (docs/build/
+    # A2-tonal-effects.md): a larger search budget, and coupled groups for the evolution strategy. FR : indications.
+    FIT = {"scanRounds": 6, "polishRounds": 12, "starts": 12, "screenSamples": 1024}
+    PARAMS = [
+        P("time_s", "s", 0.03, 0.5, 0.18, "log", "echo period"),
+        P("feedback", "x", 0.0, 0.85, 0.45, "lin", "level of each repeat relative to the previous"),
+        P("damp_hz", "Hz", 500, 16000, 4000, "log", "lowpass applied at each repeat"),
+        P("mix", "0..1", 0.0, 1.0, 0.4, "lin", "wet share, equal power"),
+        P("out_db", "dB", -24, 12, 0, "lin", "output gain"),
+    ]
+
+    def fx(self, v, x, t, sr):
+        d = v["time_s"] * sr
+
+        n = x.shape[0]
+
+        def H(w):
+            L = F.biquad_mag("lowpass", w * sr / (2.0 * math.pi), v["damp_hz"], torch.tensor(0.707), sr=sr)
+            h = torch.zeros_like(w, dtype=torch.complex64)
+            for k in range(1, TAPS + 1):
+                # A tap later than the window adds nothing to it but would wrap around the circular grid: it is faded
+                # out smoothly past n + TAIL_S, so the grid needs 2 n + 2 TAIL_S samples instead of n + 8 * 0.5 s.
+                # FR : répétitions hors fenêtre éteintes, grille plus courte.
+                keep = torch.sigmoid((n + TAIL_S * sr - k * d) / (0.01 * sr))
+                h = h + keep * (v["feedback"] ** (k - 1)) * (L ** k) * F.delay_phase(w, k * d)
+            return h
+
+        wet = F.apply_response(x, H, n + int(2 * TAIL_S * sr))
+        a = v["mix"] * math.pi / 2
+        return db_to_amp(v["out_db"]) * (torch.cos(a) * x + torch.sin(a) * wet)
+
+
+BLOCK = DelayEcho

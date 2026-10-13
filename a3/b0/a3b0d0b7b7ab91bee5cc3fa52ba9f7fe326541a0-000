@@ -1,0 +1,31 @@
+# 12 October 2026: sub_drop, a sine gliding exponentially down to end_hz, saturated by tanh (drive), slow attack and
+# long decay: cinematic sub drops and booms. Derived from the mathematics. FR : sub drop saturé.
+import torch
+
+from zrmd.audio import sfxdsp as D
+from zrmd.audio.bank import Block, db_to_amp
+
+META = D.meta("drum", "Sub drop: saturated sine gliding down to a low pitch, adjustable attack and long decay.", ["sub", "drop", "boom", "low", "saturation"], "exponential glide and tanh saturation")
+
+
+class SubDrop(Block):
+    ID = "sub_drop"
+    PARAMS = [
+        D.param("start_hz", "Hz", 40, 400, 140, "log", "pitch at the start"),
+        D.param("end_hz", "Hz", 20, 80, 35, "log", "pitch after the glide"),
+        D.param("glide_s", "s", 0.02, 0.8, 0.2, "log", "time constant of the glide"),
+        D.param("decay_s", "s (T60)", 0.2, 4.0, 1.5, "log", "time to fall 60 dB"),
+        D.param("drive", "x", 1.0, 8.0, 2.0, "lin", "tanh saturation drive (1 is almost clean)"),
+        D.param("attack_s", "s", 0.0005, 0.2, 0.005, "log", "linear attack"),
+        D.AMP(-10.0), D.ONSET(),
+    ]
+
+    def synth(self, v, t, sr):
+        o = v["onset_s"]
+        u = torch.clamp(t - o, min=0.0)
+        f = v["end_hz"] + (v["start_hz"] - v["end_hz"]) * torch.exp(-u / v["glide_s"])
+        s = D.sweep_tone(t, o, f, sr)
+        return db_to_amp(v["amp_db"]) * torch.tanh(v["drive"] * s) / torch.tanh(v["drive"]) * D.decay(t, o, v["decay_s"], v["attack_s"])
+
+
+BLOCK = SubDrop

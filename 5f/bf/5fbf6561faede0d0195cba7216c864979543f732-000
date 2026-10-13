@@ -1,0 +1,53 @@
+# 12 October 2026: notify_two_tone, the two-note notification: a soft triangle-like note (fundamental plus third
+# harmonic), then a second note interval_st semitones away, step_s later, each with its own decay. FR : notification
+# à deux notes.
+import math
+
+import torch
+
+from zrmd.audio.bank import Block, db_to_amp, envelope, stft_filter
+from zrmd.audio import fxdsp as F
+from zrmd.audio.fxdsp import param as P
+
+META = {"family": "notification", "kind": "source",
+        "description": "Two successive soft notes (fundamental plus third harmonic), interval in semitones, step time, second note level. Notifications, message received, doorbells. (12 October 2026)",
+        "tags": ["tonal", "notification", "ui", "two-tone", "chime", "doorbell"],
+        "sources": [{"what": "additive notes", "url": None, "licence": F.SOURCE}],
+        "licence": "original"}
+
+
+class NotifyTwoTone(Block):
+    ID = "notify_two_tone"
+    # 12 October 2026 (A2): fit hints measured on the failed cases of the first A2 verification (docs/build/
+    # A2-tonal-effects.md): a larger search budget (second pass: finer scans, which a pitch basin of
+    # about 0.07 semitone at the third partial needs, and a larger evolution strategy), and coupled groups for the evolution strategy. FR : indications.
+    FIT = {"scanRounds": 6, "polishRounds": 12, "starts": 12, "screenSamples": 1024, "scanPoints": 129, "scanZoomPoints": 65,
+           "scanGroups": [["onset_s", "step_s"], ["f1_hz", "interval_st"], ["note2_db", "amp_db", "h3_db"], "*"]}
+    PARAMS = [
+        P("f1_hz", "Hz", 200, 4000, 880, "log", "first note"),
+        P("interval_st", "semitones", -12.0, 12.0, 5.0, "lin", "second note relative to the first"),
+        P("step_s", "s", 0.03, 0.5, 0.12, "log", "time between the two notes"),
+        P("note_decay_s", "s (T60)", 0.05, 2.0, 0.4, "log", "decay of each note"),
+        P("h3_db", "dB", -60, -6, -20, "lin", "third harmonic level"),
+        P("note2_db", "dB", -12, 6, 0, "lin", "second note level relative"),
+        P("amp_db", "dBFS", -60, 0, -12, "lin", "peak level"),
+        P("onset_s", "s", 0.0, 0.25, 0.02, "lin", "start time in the window"),
+    ]
+
+    def note(self, t, sr, f, on, decay, h3):
+        e = envelope(t, on, torch.tensor(0.002), decay)
+        # 12 October 2026 (A2 resume): phase locked to the note onset (sine starts at zero on the attack), so pitch and
+        # onset no longer couple through the phase; the overlap of two close notes beat the same way whatever the
+        # onset, which removed the local minima of case 1 (interval 0.93 semitone). FR : phase calée sur l'attaque.
+        u = t - on
+        return e * (torch.sin(F.TWO_PI * f * u) + h3 * F.nyquist_mask(3.0 * f, sr) * torch.sin(F.TWO_PI * 3.0 * f * u)) / (1.0 + h3)
+
+    def synth(self, v, t, sr):
+        h3 = db_to_amp(v["h3_db"])
+        f2 = v["f1_hz"] * torch.pow(2.0, v["interval_st"] / 12.0)
+        y = self.note(t, sr, v["f1_hz"], v["onset_s"], v["note_decay_s"], h3)
+        y = y + db_to_amp(v["note2_db"]) * self.note(t, sr, f2, v["onset_s"] + v["step_s"], v["note_decay_s"], h3)
+        return F.amp(v) * y
+
+
+BLOCK = NotifyTwoTone

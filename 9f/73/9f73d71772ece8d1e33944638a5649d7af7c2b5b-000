@@ -1,0 +1,60 @@
+{
+  "id": "saturation",
+  "family": "distortion",
+  "kind": "effect",
+  "description": "Biased tanh waveshaper (drive, asymmetry, mix, output). Warmth, grit, overdrive, tape-like saturation. (12 October 2026)",
+  "tags": [
+    "effect",
+    "saturation",
+    "distortion",
+    "drive",
+    "warmth"
+  ],
+  "sources": [
+    {
+      "what": "tanh waveshaping",
+      "url": null,
+      "licence": "original (derived from the published mathematics, no code copied)"
+    }
+  ],
+  "licence": "original",
+  "params": [
+    {
+      "name": "drive_db",
+      "unit": "dB",
+      "min": 0.0,
+      "max": 36.0,
+      "default": 18.0,
+      "scale": "lin",
+      "description": "input gain into the curve"
+    },
+    {
+      "name": "bias",
+      "unit": "x",
+      "min": -0.5,
+      "max": 0.5,
+      "default": 0.1,
+      "scale": "lin",
+      "description": "asymmetry (even harmonics)"
+    },
+    {
+      "name": "mix",
+      "unit": "0..1",
+      "min": 0.0,
+      "max": 1.0,
+      "default": 1.0,
+      "scale": "lin",
+      "description": "wet share"
+    },
+    {
+      "name": "out_db",
+      "unit": "dB",
+      "min": -36.0,
+      "max": 6.0,
+      "default": -12.0,
+      "scale": "lin",
+      "description": "output gain"
+    }
+  ],
+  "date": "12 October 2026"
+}

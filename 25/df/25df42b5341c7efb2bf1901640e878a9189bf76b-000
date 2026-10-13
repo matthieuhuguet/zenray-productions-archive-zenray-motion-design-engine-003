@@ -1,0 +1,36 @@
+# 12 October 2026: transient_shaper, the gain is (fast RMS / slow RMS) ** amount, with two exponential RMS followers
+# (fast_ms, slow_ms) computed as convolutions so that both time constants are differentiable; amount > 0 sharpens
+# attacks, amount < 0 softens them. FR : modeleur de transitoires, rapport de deux suiveurs d'enveloppe.
+import math
+
+import torch
+
+from zrmd.audio.bank import db_to_amp, stft_filter
+from zrmd.audio import fxdsp as F
+from zrmd.audio.fxdsp import EffectBlock
+from zrmd.audio.fxdsp import param as P
+
+META = {"family": "dynamics", "kind": "effect",
+        "description": "Transient shaper: gain (fast envelope / slow envelope) ** amount, both time constants differentiable. Punchier or softer attacks. (12 October 2026)",
+        "tags": ["effect", "dynamics", "transient", "punch", "attack"],
+        "sources": [{"what": "differential envelope transient design", "url": None, "licence": F.SOURCE}],
+        "licence": "original"}
+
+
+class TransientShaper(EffectBlock):
+    ID = "transient_shaper"
+    PARAMS = [
+        P("amount", "x", -1.0, 1.0, 0.6, "lin", "attack emphasis (negative softens)"),
+        P("fast_ms", "ms", 0.5, 20.0, 2.0, "log", "fast follower time constant"),
+        P("slow_ms", "ms", 10.0, 300.0, 60.0, "log", "slow follower time constant"),
+        P("out_db", "dB", -24, 12, -2, "lin", "output gain (default -2, 12 October 2026: peak under 0 dBFS)"),
+    ]
+
+    def fx(self, v, x, t, sr):
+        ef = F.env_rms(x, v["fast_ms"] * 1e-3, sr)
+        es = F.env_rms(x, v["slow_ms"] * 1e-3, sr)
+        gain = torch.exp(torch.clamp(v["amount"] * (torch.log(ef) - torch.log(es)), -4.0, 4.0))
+        return db_to_amp(v["out_db"]) * x * gain
+
+
+BLOCK = TransientShaper

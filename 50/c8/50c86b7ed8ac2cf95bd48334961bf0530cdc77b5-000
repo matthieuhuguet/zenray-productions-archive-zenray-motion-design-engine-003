@@ -1,0 +1,21 @@
+# 12 October 2026: the zrmd engine package (ZenRay Motion Design).
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "zrmd"
+version = "0.1.0"
+description = "ZenRay Motion Design: measure a reference motion-design video and rebuild it as versioned HyperFrames compositions."
+requires-python = ">=3.11"
+dependencies = ["numpy", "scipy", "opencv-python-headless", "librosa", "soundfile", "scikit-image", "scikit-learn", "pyloudnorm", "fonttools", "pillow"]
+
+[project.optional-dependencies]
+# 12 October 2026: F0 vector harness, versions pinned (see requirements-vector.txt).
+vector = ["skia-python==144.0.post2", "uharfbuzz==0.56.3", "resvg-py==0.5.0"]
+
+[project.scripts]
+zrmd = "zrmd.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["zrmd*"]

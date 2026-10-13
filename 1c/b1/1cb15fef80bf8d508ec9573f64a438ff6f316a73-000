@@ -1,0 +1,33 @@
+# 12 October 2026: kick, a sine whose pitch falls exponentially from start_hz to end_hz (pitch_tau_s), a 60 dB body
+# decay, plus a short band-passed noise click. Derived from the mathematics. FR : grosse caisse, chute de hauteur et clic.
+import torch
+
+from zrmd.audio import sfxdsp as D
+from zrmd.audio.bank import Block, db_to_amp
+
+CLICK_BW_OCT, CLICK_T60 = 2.0, 0.008
+META = D.meta("drum", "Kick drum: exponential pitch drop sine body with 60 dB decay and a band-passed noise click.", ["drum", "kick", "transient", "low", "pitch drop"], "pitch-drop oscillator and filtered noise click")
+
+
+class Kick(Block):
+    ID = "kick"
+    PARAMS = [
+        D.param("start_hz", "Hz", 60, 1000, 220, "log", "pitch at the hit"),
+        D.param("end_hz", "Hz", 25, 200, 50, "log", "pitch after the drop"),
+        D.param("pitch_tau_s", "s", 0.003, 0.2, 0.03, "log", "time constant of the pitch drop"),
+        D.param("decay_s", "s (T60)", 0.05, 2.0, 0.5, "log", "body time to fall 60 dB"),
+        D.param("click_db", "dB re body", -40, 0, -12, "lin", "click level"),
+        D.param("click_hz", "Hz", 1000, 12000, 4000, "log", "click band centre"),
+        D.AMP(-10.0), D.ONSET(),
+    ]
+
+    def synth(self, v, t, sr):
+        o = v["onset_s"]
+        u = torch.clamp(t - o, min=0.0)
+        f = v["end_hz"] + (v["start_hz"] - v["end_hz"]) * torch.exp(-u / v["pitch_tau_s"])
+        body = D.sweep_tone(t, o, f, sr) * D.decay(t, o, v["decay_s"])
+        click = D.filtered(self.noise(t.shape[0], t.device), lambda fr: D.band(fr, v["click_hz"], CLICK_BW_OCT), sr) * D.decay(t, o, CLICK_T60, 0.0002)
+        return db_to_amp(v["amp_db"]) * (body + db_to_amp(v["click_db"]) * click)
+
+
+BLOCK = Kick

@@ -1,0 +1,95 @@
+{
+  "id": "snare",
+  "family": "drum",
+  "description": "Snare drum: two decaying membrane modes plus band-passed noise wires with their own decay. (12 October 2026)",
+  "tags": [
+    "drum",
+    "snare",
+    "transient",
+    "noise",
+    "modal"
+  ],
+  "sources": [
+    {
+      "what": "modal partials and filtered noise",
+      "url": null,
+      "licence": "original (derived from the mathematics, no code copied)"
+    }
+  ],
+  "licence": "original",
+  "params": [
+    {
+      "name": "body_hz",
+      "unit": "Hz",
+      "min": 100.0,
+      "max": 400.0,
+      "default": 190.0,
+      "scale": "log",
+      "description": "first membrane mode"
+    },
+    {
+      "name": "body_decay_s",
+      "unit": "s (T60)",
+      "min": 0.03,
+      "max": 0.6,
+      "default": 0.15,
+      "scale": "log",
+      "description": "membrane decay"
+    },
+    {
+      "name": "noise_hz",
+      "unit": "Hz",
+      "min": 1000.0,
+      "max": 12000.0,
+      "default": 4500.0,
+      "scale": "log",
+      "description": "wire band centre"
+    },
+    {
+      "name": "noise_bw_oct",
+      "unit": "octaves",
+      "min": 0.5,
+      "max": 6.0,
+      "default": 2.5,
+      "scale": "log",
+      "description": "wire band width"
+    },
+    {
+      "name": "noise_decay_s",
+      "unit": "s (T60)",
+      "min": 0.03,
+      "max": 0.8,
+      "default": 0.2,
+      "scale": "log",
+      "description": "wire decay"
+    },
+    {
+      "name": "snappy_db",
+      "unit": "dB re body",
+      "min": -24.0,
+      "max": 12.0,
+      "default": 0.0,
+      "scale": "lin",
+      "description": "wire level"
+    },
+    {
+      "name": "amp_db",
+      "unit": "dBFS",
+      "min": -60.0,
+      "max": 0.0,
+      "default": -14.0,
+      "scale": "lin",
+      "description": "peak level of the main layer"
+    },
+    {
+      "name": "onset_s",
+      "unit": "s",
+      "min": 0.0,
+      "max": 0.2,
+      "default": 0.02,
+      "scale": "lin",
+      "description": "start time in the window"
+    }
+  ],
+  "date": "12 October 2026"
+}

@@ -1,0 +1,214 @@
+#!/usr/bin/env python3
+# 12 October 2026, 15:40 CEST: MCP server "zenray-motion-design", stdlib only (runs on /usr/bin/python3 3.9),
+# same shape as /Users/zenray/.claude/Memory1/Houdini/MCP/zrhoudini.py: newline-delimited JSON-RPC on stdio,
+# and also a command line. Every tool calls the zrmd CLI in the engine venv; long work runs as a detached job
+# followed through jobs/<id>/status.json, so a call never blocks the conversation for minutes.
+# FR : serveur MCP sans dépendance ; les tâches longues partent en arrière-plan et se suivent par leur statut.
+"""zenray-motion-design MCP server. Run with --mcp for stdio, or as a CLI: zrmd_mcp.py <tool> '<json args>'."""
+import json
+import os
+import signal
+import subprocess
+import sys
+import time
+import uuid
+from pathlib import Path
+
+ENGINE = Path(__file__).resolve().parent.parent
+SETTINGS = json.loads((ENGINE / "settings.json").read_text(encoding="utf-8"))
+P = {
+    "server_name": "zenray-motion-design",
+    "server_version": "0.1.0",
+    "mcp_protocol": "2025-06-18",
+    "python": os.environ.get("ZRMD_PYTHON", SETTINGS["paths"]["python"]),
+    "workshop": Path(os.environ.get("ZRMD_WORKSHOP", SETTINGS["paths"]["workshop"])),
+    "sync_timeout_s": float(os.environ.get("ZRMD_SYNC_TIMEOUT", "60")),
+}
+JOBS = P["workshop"] / "jobs"
+
+
+def _cli(args, timeout=None):
+    """Run python -I -m zrmd.cli <args> and parse its JSON."""
+    proc = subprocess.run([P["python"], "-I", "-m", "zrmd.cli"] + list(args), cwd=str(ENGINE), capture_output=True,
+                          text=True, timeout=timeout or P["sync_timeout_s"])
+    try:
+        data = json.loads(proc.stdout)
+    except ValueError:
+        data = {"ok": False, "error": (proc.stderr or proc.stdout)[-2000:]}
+    if proc.returncode != 0 and data.get("ok", True):
+        data["ok"] = False
+        data["error"] = (proc.stderr or "")[-2000:]
+    return data
+
+
+def _job(command, label):
+    """Start a detached job; its status file says running, done or failed, with the last log lines."""
+    job_id = time.strftime("%Y%m%d-%H%M%S") + "-" + uuid.uuid4().hex[:6]
+    folder = JOBS / job_id
+    folder.mkdir(parents=True)
+    log = open(folder / "run.log", "w")
+    proc = subprocess.Popen(command, cwd=str(ENGINE), stdout=log, stderr=subprocess.STDOUT, start_new_session=True)
+    status = {"job": job_id, "label": label, "pid": proc.pid, "command": command, "state": "running",
+              "started": time.strftime("%Y-%m-%d %H:%M:%S")}
+    (folder / "status.json").write_text(json.dumps(status, indent=1), encoding="utf-8")
+    return {"ok": True, "job": job_id, "pid": proc.pid, "follow": "motion_job"}
+
+
+def _alive(pid):
+    try:
+        os.kill(pid, 0)
+        return True
+    except OSError:
+        return False
+
+
+def tool_job(a):
+    folder = JOBS / a["job"]
+    status = json.loads((folder / "status.json").read_text(encoding="utf-8"))
+    if status["state"] == "running" and not _alive(status["pid"]):
+        status["state"] = "finished"
+        status["ended"] = time.strftime("%Y-%m-%d %H:%M:%S")
+        (folder / "status.json").write_text(json.dumps(status, indent=1), encoding="utf-8")
+    lines = (folder / "run.log").read_text(encoding="utf-8", errors="replace").splitlines()
+    if a.get("cancel") and status["state"] == "running":
+        os.killpg(status["pid"], signal.SIGTERM)
+        status["state"] = "cancelled"
+        (folder / "status.json").write_text(json.dumps(status, indent=1), encoding="utf-8")
+    return {"ok": True, **status, "tail": lines[-int(a.get("lines", 20)):]}
+
+
+def tool_references(a):
+    return _cli(["references"])
+
+
+def tool_shots(a):
+    return _cli(["shots", a["slug"]], timeout=300)
+
+
+def tool_list(a):
+    return _cli(["motions"])
+
+
+def tool_get(a):
+    return _cli(["motion", a["id"]] + (["--version", a["version"]] if a.get("version") else []))
+
+
+def tool_iterate(a):
+    args = ["iterate", a["id"]] + sum([["--set", s] for s in a.get("set", [])], [])
+    if a.get("note"):
+        args += ["--note", a["note"]]
+    if a.get("parent"):
+        args += ["--parent", a["parent"]]
+    args += ["--author", a.get("author", "claude")]
+    return _job([P["python"], "-I", "-m", "zrmd.cli"] + args, f"iterate {a['id']}")
+
+
+def tool_reproduce_textcard(a):
+    command = [P["python"], "-I", str(ENGINE / "Scripts" / "ReproduceTextCard.py"), "--video", a["video"],
+               "--start", str(a["start"]), "--end", str(a["end"]), "--motion", str(P["workshop"] / "motions" / a["motion_id"]),
+               "--words", a["words"], "--passes", str(a.get("passes", 6))]
+    return _job(command, f"textcard {a['motion_id']}")
+
+
+def tool_sound(a):
+    script = ENGINE / "Scripts" / "ReproduceSound.py"
+    if not script.exists():
+        return {"ok": False, "error": "Scripts/ReproduceSound.py is not built yet"}
+    command = [P["python"], "-I", str(script), "--slug", a["slug"], "--out", a.get("out", str(P["workshop"] / "sound" / a["slug"]))]
+    return _job(command, f"sound {a['slug']}")
+
+
+def tool_book(a):
+    script = ENGINE / "Scripts" / "BuildReferenceBook.py"
+    if not script.exists():
+        return {"ok": False, "error": "Scripts/BuildReferenceBook.py is not built yet"}
+    return _job([P["python"], "-I", str(script), "--slug", a["slug"]], f"book {a['slug']}")
+
+
+def tool_catalog(a):
+    return _cli(["catalog"], timeout=300)
+
+
+STR = {"type": "string"}
+TOOLS = [
+    {"name": "motion_references", "fn": tool_references, "description": "List downloaded reference videos (slug, duration, size, fps, audio).",
+     "inputSchema": {"type": "object", "properties": {}}},
+    {"name": "motion_shots", "fn": tool_shots, "description": "Frame-exact shot detection of a reference; writes references/<slug>/analysis/shots.json.",
+     "inputSchema": {"type": "object", "properties": {"slug": STR}, "required": ["slug"]}},
+    {"name": "motion_list", "fn": tool_list, "description": "List motions with latest version V_NNN and fidelity score per dimension.",
+     "inputSchema": {"type": "object", "properties": {}}},
+    {"name": "motion_get", "fn": tool_get, "description": "One motion: versions, scores, and the params.json of a version (default latest).",
+     "inputSchema": {"type": "object", "properties": {"id": STR, "version": STR}, "required": ["id"]}},
+    {"name": "motion_iterate", "fn": tool_iterate,
+     "description": "New version from the latest (or parent) with dotted overrides like 'layers.1.font.size=88', then cook, render, verify. Detached job.",
+     "inputSchema": {"type": "object", "properties": {"id": STR, "set": {"type": "array", "items": STR}, "note": STR, "parent": STR},
+                     "required": ["id"]}},
+    {"name": "motion_reproduce_textcard", "fn": tool_reproduce_textcard,
+     "description": "Closed-loop reproduction of a caption shot (measure, build, render, verify, correct) into motions/<motion_id>. Detached job.",
+     "inputSchema": {"type": "object", "properties": {"video": STR, "start": {"type": "number"}, "end": {"type": "number"},
+                                                      "motion_id": STR, "words": STR, "passes": {"type": "integer"}},
+                     "required": ["video", "start", "end", "motion_id", "words"]}},
+    {"name": "motion_sound", "fn": tool_sound, "description": "Rebuild a reference soundtrack in code (SFX fitted, original music, mix, score). Detached job.",
+     "inputSchema": {"type": "object", "properties": {"slug": STR, "out": STR}, "required": ["slug"]}},
+    {"name": "motion_book", "fn": tool_book, "description": "Graphic bible and storyboard of a reference. Detached job.",
+     "inputSchema": {"type": "object", "properties": {"slug": STR}, "required": ["slug"]}},
+    {"name": "motion_catalog", "fn": tool_catalog, "description": "Rewrite the gallery catalogue (catalog.json) from every motion's latest version.",
+     "inputSchema": {"type": "object", "properties": {}}},
+    {"name": "motion_job", "fn": tool_job, "description": "Status and last log lines of a detached job; cancel=true stops it.",
+     "inputSchema": {"type": "object", "properties": {"job": STR, "lines": {"type": "integer"}, "cancel": {"type": "boolean"}},
+                     "required": ["job"]}},
+]
+
+
+def _serve_mcp():
+    def reply(message):
+        sys.stdout.write(json.dumps(message, ensure_ascii=False) + "\n")
+        sys.stdout.flush()
+
+    for line in sys.stdin:
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            request = json.loads(line)
+        except ValueError:
+            continue
+        method, request_id, params = request.get("method"), request.get("id"), request.get("params") or {}
+        if request_id is None:
+            continue
+        if method == "initialize":
+            reply({"jsonrpc": "2.0", "id": request_id, "result": {"protocolVersion": P["mcp_protocol"], "capabilities": {"tools": {}},
+                                                                   "serverInfo": {"name": P["server_name"], "version": P["server_version"]}}})
+        elif method == "tools/list":
+            reply({"jsonrpc": "2.0", "id": request_id,
+                   "result": {"tools": [{k: t[k] for k in ("name", "description", "inputSchema")} for t in TOOLS]}})
+        elif method == "tools/call":
+            tool = next((t for t in TOOLS if t["name"] == params.get("name")), None)
+            if tool is None:
+                reply({"jsonrpc": "2.0", "id": request_id, "error": {"code": -32602, "message": "unknown tool: %s" % params.get("name")}})
+                continue
+            try:
+                result = tool["fn"](params.get("arguments") or {})
+                failed = not result.get("ok", True)
+            except Exception as exc:
+                result, failed = {"ok": False, "error": "%s: %s" % (type(exc).__name__, exc)}, True
+            reply({"jsonrpc": "2.0", "id": request_id, "result": {
+                "content": [{"type": "text", "text": json.dumps(result, ensure_ascii=False, indent=1, default=str)}], "isError": failed}})
+        elif method in ("ping", "shutdown"):
+            reply({"jsonrpc": "2.0", "id": request_id, "result": {}})
+        else:
+            reply({"jsonrpc": "2.0", "id": request_id, "error": {"code": -32601, "message": "unhandled method: %s" % method}})
+
+
+if __name__ == "__main__":
+    if "--mcp" in sys.argv:
+        _serve_mcp()
+    elif len(sys.argv) >= 2:
+        tool = next((t for t in TOOLS if t["name"] in (sys.argv[1], "motion_" + sys.argv[1])), None)
+        if not tool:
+            print(__doc__); print("tools: " + ", ".join(t["name"] for t in TOOLS)); sys.exit(2)
+        result = tool["fn"](json.loads(sys.argv[2]) if len(sys.argv) > 2 else {})
+        print(json.dumps(result, ensure_ascii=False, indent=1, default=str))
+        sys.exit(0 if result.get("ok", True) else 1)
+    else:
+        print(__doc__)

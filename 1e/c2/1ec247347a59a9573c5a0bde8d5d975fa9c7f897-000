@@ -1,0 +1,43 @@
+# 12 October 2026: glitch_stutter, a parametric grain pattern: up to 16 grains on a grid at rate_hz (count
+# continuous), each kept or muted by density against a fixed R1 pattern, each a soft-clipped sine whose pitch is
+# base_hz times 2 ** (spread_oct * (pattern - 0.5)), inside a smooth box of grain_s. Derived from the mathematics.
+# FR : glitch, motif de grains déterministe.
+import math
+
+import torch
+
+from zrmd.audio import sfxdsp as D
+from zrmd.audio.bank import Block, db_to_amp
+
+K, SALT_ON, SALT_PITCH, RAMP_S, CLIP, DENSITY_SHARP = 16, 0.41, 0.83, 0.0005, 3.0, 12.0
+META = D.meta("glitch", "Glitch stutter: deterministic grain pattern (rate, count, density, pitch spread) of soft-clipped sine grains.", ["glitch", "stutter", "digital", "grain", "pattern", "ui"], "deterministic grain pattern (R1 sequence)")
+
+
+class GlitchStutter(Block):
+    ID = "glitch_stutter"
+    # 12 October 2026 (A1): stroke pattern, so the fitter guides with a time blur first (see ploss.time_blur_error).
+    FIT = {"screenBlurMs": 25.0, "blurStartMs": 30.0, "blurEndMs": 2.0, "screenSamples": 768,
+           "scanGroups": [["onset_s", "rate_hz", "grain_s"], "*"],
+           "scanPairs": [["rate_hz", "count"], ["density", "amp_db"], ["grain_s", "density"]]}
+    PARAMS = [
+        D.param("base_hz", "Hz", 80, 4000, 600, "log", "centre pitch of the grains"),
+        D.param("spread_oct", "octaves", 0.0, 4.0, 1.5, "lin", "pitch spread across the grains"),
+        D.param("grain_s", "s", 0.004, 0.06, 0.02, "log", "length of each grain"),
+        D.param("rate_hz", "grains/s", 8, 40, 20, "log", "grain grid rate"),
+        D.param("count", "grains", 1, 16, 10, "lin", "number of grid slots (continuous)"),
+        D.param("density", "fraction", 0.1, 1.0, 0.7, "lin", "share of slots that sound"),
+        D.AMP(-14.0), D.ONSET(),
+    ]
+
+    def synth(self, v, t, sr):
+        dev = t.device
+        times = D.hit_times(v["onset_s"], v["rate_hz"], K, 0.0, 0.0, dev)
+        on = D.soft_count(v["count"], K, dev) * torch.sigmoid(DENSITY_SHARP * (v["density"] - D.pattern(K, SALT_ON, dev)))
+        f = v["base_hz"] * torch.pow(2.0, v["spread_oct"] * (D.pattern(K, SALT_PITCH, dev) - 0.5))
+        u = torch.clamp(t[None, :] - times[:, None], min=0.0)
+        grains = torch.tanh(CLIP * torch.sin(2.0 * math.pi * f[:, None] * u)) / math.tanh(CLIP)
+        y = (on[:, None] * D.box(t[None, :], times[:, None], v["grain_s"], RAMP_S) * grains).sum(0)
+        return db_to_amp(v["amp_db"]) * y
+
+
+BLOCK = GlitchStutter

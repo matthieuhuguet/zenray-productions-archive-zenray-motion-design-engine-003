@@ -1,0 +1,33 @@
+# 12 October 2026: snare, two membrane modes (ratio 1.83) with their decay plus band-passed noise (the wires) with its
+# own decay; snappy_db sets the wire level. Derived from the mathematics. FR : caisse claire, deux modes et timbre.
+import torch
+
+from zrmd.audio import sfxdsp as D
+from zrmd.audio.bank import Block, db_to_amp
+
+MODE_RATIO, MODE2_AMP, MODE2_DECAY = 1.83, 0.5, 0.7
+META = D.meta("drum", "Snare drum: two decaying membrane modes plus band-passed noise wires with their own decay.", ["drum", "snare", "transient", "noise", "modal"], "modal partials and filtered noise")
+
+
+class Snare(Block):
+    ID = "snare"
+    PARAMS = [
+        D.param("body_hz", "Hz", 100, 400, 190, "log", "first membrane mode"),
+        D.param("body_decay_s", "s (T60)", 0.03, 0.6, 0.15, "log", "membrane decay"),
+        D.param("noise_hz", "Hz", 1000, 12000, 4500, "log", "wire band centre"),
+        D.param("noise_bw_oct", "octaves", 0.5, 6.0, 2.5, "log", "wire band width"),
+        D.param("noise_decay_s", "s (T60)", 0.03, 0.8, 0.2, "log", "wire decay"),
+        D.param("snappy_db", "dB re body", -24, 12, 0, "lin", "wire level"),
+        D.AMP(-14.0), D.ONSET(),
+    ]
+
+    def synth(self, v, t, sr):
+        o = v["onset_s"]
+        dev = t.device
+        f = v["body_hz"] * torch.tensor([1.0, MODE_RATIO], device=dev)
+        body = D.partials(t, o, f, v["body_decay_s"] * torch.tensor([1.0, MODE2_DECAY], device=dev), torch.tensor([1.0, MODE2_AMP], device=dev))
+        wires = D.filtered(self.noise(t.shape[0], dev), lambda fr: D.band(fr, v["noise_hz"], v["noise_bw_oct"]), sr) * D.decay(t, o, v["noise_decay_s"], 0.0003)
+        return db_to_amp(v["amp_db"]) * (body + db_to_amp(v["snappy_db"]) * wires)
+
+
+BLOCK = Snare

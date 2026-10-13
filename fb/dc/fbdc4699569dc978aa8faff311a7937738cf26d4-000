@@ -1,0 +1,96 @@
+{
+  "id": "key_press",
+  "family": "foley",
+  "description": "Key press: down click, bottom-out thock (low mode and low-passed noise), release click after a hold. (12 October 2026)",
+  "tags": [
+    "foley",
+    "keyboard",
+    "key",
+    "click",
+    "mechanical",
+    "transient"
+  ],
+  "sources": [
+    {
+      "what": "filtered noise clicks and a decaying mode",
+      "url": null,
+      "licence": "original (derived from the mathematics, no code copied)"
+    }
+  ],
+  "licence": "original",
+  "params": [
+    {
+      "name": "click_hz",
+      "unit": "Hz",
+      "min": 1000.0,
+      "max": 10000.0,
+      "default": 3500.0,
+      "scale": "log",
+      "description": "click band centre"
+    },
+    {
+      "name": "thock_hz",
+      "unit": "Hz",
+      "min": 80.0,
+      "max": 800.0,
+      "default": 250.0,
+      "scale": "log",
+      "description": "pitch of the bottom-out mode"
+    },
+    {
+      "name": "decay_s",
+      "unit": "s (T60)",
+      "min": 0.01,
+      "max": 0.2,
+      "default": 0.05,
+      "scale": "log",
+      "description": "thock decay"
+    },
+    {
+      "name": "thock_db",
+      "unit": "dB re click",
+      "min": -24.0,
+      "max": 6.0,
+      "default": -4.0,
+      "scale": "lin",
+      "description": "thock level"
+    },
+    {
+      "name": "hold_s",
+      "unit": "s",
+      "min": 0.04,
+      "max": 0.35,
+      "default": 0.12,
+      "scale": "log",
+      "description": "time until the key is released"
+    },
+    {
+      "name": "release_db",
+      "unit": "dB re click",
+      "min": -40.0,
+      "max": 0.0,
+      "default": -9.0,
+      "scale": "lin",
+      "description": "release click level"
+    },
+    {
+      "name": "amp_db",
+      "unit": "dBFS",
+      "min": -60.0,
+      "max": 0.0,
+      "default": -14.0,
+      "scale": "lin",
+      "description": "peak level of the main layer"
+    },
+    {
+      "name": "onset_s",
+      "unit": "s",
+      "min": 0.0,
+      "max": 0.2,
+      "default": 0.02,
+      "scale": "lin",
+      "description": "start time in the window"
+    }
+  ],
+  "date": "12 October 2026"
+}

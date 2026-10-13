@@ -1,0 +1,48 @@
+# 12 October 2026: supersaw, seven band-limited (polyBLEP) saws detuned symmetrically around f0, the six side voices
+# at one level, through a static lowpass (RBJ magnitude on the STFT grid), with attack and 60 dB decay.
+# Derived from the mathematics (polyBLEP, Valimaki and Huovilainen 2007). FR : sept dents de scie désaccordées.
+import math
+
+import torch
+
+from zrmd.audio.bank import Block, db_to_amp, envelope, stft_filter
+from zrmd.audio import fxdsp as F
+from zrmd.audio.fxdsp import param as P
+
+META = {"family": "subtractive", "kind": "source",
+        "description": "Seven detuned polyBLEP saws (side voices level, detune spread) through a lowpass, attack and decay. Trance and EDM leads, risers, big chords. (12 October 2026)",
+        "tags": ["tonal", "saw", "supersaw", "lead", "pad", "subtractive"],
+        "sources": [{"what": "polyBLEP oscillator", "url": None, "reference": "V. Valimaki and A. Huovilainen, Antialiasing oscillators in subtractive synthesis, IEEE SPM 24(2), 2007", "licence": F.SOURCE}, F.RBJ],
+        "licence": "original"}
+OFFSETS = [-1.0, -0.62, -0.31, 0.0, 0.29, 0.6, 1.0]
+PHASES = [0.0, 0.37, 0.71, 0.13, 0.52, 0.89, 0.26]
+
+
+class Supersaw(Block):
+    ID = "supersaw"
+    # 12 October 2026 (A2): fit hints measured on the failed cases of the first A2 verification (docs/build/
+    # A2-tonal-effects.md): a larger search budget, and coupled groups for the evolution strategy. FR : indications.
+    FIT = {"scanRounds": 6, "polishRounds": 12, "starts": 12, "screenSamples": 1024}
+    PARAMS = [
+        P("f0_hz", "Hz", 40, 2000, 220, "log", "centre pitch"),
+        P("detune_cents", "cents", 1.0, 60.0, 18.0, "log", "outer voice detune"),
+        P("side_db", "dB", -30, 0, -4, "lin", "level of the six side voices"),
+        P("cutoff_hz", "Hz", 200, 16000, 4000, "log", "lowpass cutoff"),
+        P("attack_s", "s", 0.001, 0.5, 0.02, "log", "linear attack"),
+        P("decay_s", "s (T60)", 0.1, 6.0, 1.5, "log", "time to fall 60 dB"),
+        P("amp_db", "dBFS", -60, 0, -12, "lin", "peak level"),
+        P("onset_s", "s", 0.0, 0.25, 0.02, "lin", "start time in the window"),
+    ]
+
+    def synth(self, v, t, sr):
+        side = db_to_amp(v["side_db"])
+        y = torch.zeros_like(t)
+        for o, ph in zip(OFFSETS, PHASES):
+            f = v["f0_hz"] * torch.pow(2.0, o * v["detune_cents"] / 1200.0) * torch.ones_like(t)
+            y = y + (1.0 if o == 0.0 else side) * F.saw(f, sr, ph)
+        y = y / (1.0 + 6.0 * side)
+        y = stft_filter(y, lambda fr, tm: F.biquad_mag("lowpass", fr, v["cutoff_hz"], torch.tensor(0.707), sr=sr), 1024, 256, sr)
+        return F.amp(v) * F.env_of(t, v) * y
+
+
+BLOCK = Supersaw

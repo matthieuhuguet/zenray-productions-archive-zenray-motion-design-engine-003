@@ -1,0 +1,33 @@
+# 12 October 2026: thud, a dull hit: low-passed noise with attack and decay plus a low sine at tone_hz. Bodies falling,
+# boxes, doors. Derived from the mathematics. FR : choc sourd, bruit passe-bas et sinus grave.
+import math
+
+import torch
+
+from zrmd.audio import sfxdsp as D
+from zrmd.audio.bank import Block, db_to_amp
+
+TONE_DECAY_RATIO = 1.2
+META = D.meta("impact", "Thud: low-passed noise hit with attack and decay plus a low sine tone.", ["impact", "thud", "dull", "low", "foley"], "filtered noise and a sine")
+
+
+class Thud(Block):
+    ID = "thud"
+    PARAMS = [
+        D.param("cut_hz", "Hz", 60, 1500, 300, "log", "low-pass cutoff of the noise"),
+        D.param("decay_s", "s (T60)", 0.03, 0.8, 0.2, "log", "time to fall 60 dB"),
+        D.param("attack_s", "s", 0.0005, 0.03, 0.002, "log", "linear attack"),
+        D.param("tone_hz", "Hz", 30, 200, 70, "log", "pitch of the sine"),
+        D.param("tone_db", "dB re noise", -30, 6, -6, "lin", "sine level"),
+        D.AMP(-12.0), D.ONSET(),
+    ]
+
+    def synth(self, v, t, sr):
+        o = v["onset_s"]
+        noise = D.filtered(self.noise(t.shape[0], t.device), lambda fr: D.lowpass(fr, v["cut_hz"], 18.0), sr) * D.decay(t, o, v["decay_s"], v["attack_s"])
+        u = torch.clamp(t - o, min=0.0)
+        tone = math.sqrt(2.0) * torch.sin(2.0 * math.pi * v["tone_hz"] * u) * D.decay(t, o, v["decay_s"] * TONE_DECAY_RATIO, v["attack_s"])
+        return db_to_amp(v["amp_db"]) * (noise + db_to_amp(v["tone_db"]) * tone)
+
+
+BLOCK = Thud

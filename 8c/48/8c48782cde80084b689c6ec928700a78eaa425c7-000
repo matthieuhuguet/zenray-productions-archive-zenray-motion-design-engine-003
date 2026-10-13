@@ -1,0 +1,131 @@
+# 12 October 2026, 12:05 CEST: rebuild a whole reference film from its motions, frame-exact.
+# Segments come from the shot list (zrmd.analyze.shots) and the motions already reproduced for this reference
+# (each motion.json carries its source window). Every remaining window becomes a plate colour animatic
+# (Scripts/ReproducePlate.py); gaps are black. The montage (zrmd.emit.montage) cooks one HyperFrames project,
+# rendered once, then the soundtrack (--audio) is muxed without re-encoding the picture. The rhythm check
+# detects the cuts of the result and matches them to the reference at +-1 frame.
+# Run: python -I Scripts/ReproduceFilm.py --slug onekey-pro-2 --id onekey-film [--audio <mix.wav>]
+from __future__ import annotations
+
+import argparse
+import json
+import subprocess
+import sys
+from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
+
+ENGINE = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(ENGINE))
+from zrmd import settings, versions  # noqa: E402
+from zrmd.analyze import shots as shots_mod  # noqa: E402
+from zrmd.emit import montage  # noqa: E402
+from zrmd.render import render  # noqa: E402
+from zrmd.verify.fidelity import rhythm_presence  # noqa: E402
+
+FPS = 60
+
+
+def best_version(folder: Path) -> str | None:
+    best = None
+    for v in versions.list_versions(folder):
+        fid = versions.read_json(folder / v / "fidelity.json")
+        if fid and (folder / v / "render.mp4").exists() and (best is None or fid.get("score", 0) > best[1]):
+            best = (v, fid.get("score", 0))
+    return best[0] if best else versions.latest_version(folder)
+
+
+def black_clip(frames: int, root: Path) -> Path:
+    path = root / "black" / f"black-{frames}.mp4"
+    if not path.exists():
+        path.parent.mkdir(parents=True, exist_ok=True)
+        subprocess.run(["ffmpeg", "-v", "error", "-y", "-f", "lavfi", "-i", f"color=c=black:s=1920x1080:r={FPS}",
+                        "-frames:v", str(frames), "-c:v", "libx264", "-pix_fmt", "yuv420p", str(path)], check=True)
+    return path
+
+
+def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--slug", required=True); ap.add_argument("--id", required=True)
+    ap.add_argument("--audio", default=None); ap.add_argument("--jobs", type=int, default=3)
+    ap.add_argument("--overlays", action="store_true", help="rebuild caption overlays on plates")
+    a = ap.parse_args()
+    workshop = settings.path("workshop")
+    meta = json.loads((workshop / "references" / a.slug / "reference.json").read_text(encoding="utf-8"))
+    video = str(settings.path("refcache") / a.slug / meta["file_name"])
+    det = shots_mod.detect(video)
+    total = det["frames"]
+    # Motions already reproduced for this reference, by source window (frames).
+    owned = []
+    for folder in sorted((workshop / "motions").iterdir()):
+        m = versions.read_json(folder / "motion.json", {}) or {}
+        src = m.get("source") or {}
+        if src.get("slug") == a.slug and m.get("recipe") in ("textcard", "graphic"):
+            owned.append({"motion": folder.name, "a": int(round(src["start"] * FPS)), "b": int(round(src["end"] * FPS))})
+    owned.sort(key=lambda o: o["a"])
+    cuts = [s["start_frame"] for s in det["shots"]] + [total]
+    # Free windows (not covered by an owned motion), split at the reference cuts, become plates.
+    segments, cursor = [], 0
+    for o in owned + [{"motion": None, "a": total, "b": total}]:
+        free_a, free_b = cursor, o["a"]
+        bounds = sorted({free_a, free_b} | {c for c in cuts if free_a < c < free_b})
+        for x, y in zip(bounds[:-1], bounds[1:]):
+            if y - x >= 6:
+                segments.append({"kind": "plate", "a": x, "b": y})
+            elif y > x:
+                segments.append({"kind": "black", "a": x, "b": y})
+        if o["motion"]:
+            segments.append({"kind": "motion", "motion": o["motion"], "a": o["a"], "b": o["b"]})
+            cursor = o["b"]
+    # Reproduce missing plates in parallel.
+    def plate(seg):
+        mid = f"{a.slug.split('-')[0]}-p{seg['a']:05d}-plate"
+        folder = workshop / "motions" / mid
+        latest = versions.latest_version(folder)
+        has_overlays = latest and any(l.get("id", "").startswith("ov") for l in
+                                      (versions.read_json(folder / latest / "params.json", {}) or {}).get("layers", []))
+        if not latest or (a.overlays and not has_overlays and not (folder / ".no-overlays").exists()):
+            cmd = [sys.executable, "-I", str(ENGINE / "Scripts" / "ReproducePlate.py"), "--slug", a.slug,
+                   "--start", f"{seg['a'] / FPS:.6f}", "--end", f"{seg['b'] / FPS:.6f}", "--motion", str(folder)]
+            if a.overlays:
+                cmd.append("--overlays")
+            subprocess.run(cmd, check=True, capture_output=True)
+            if a.overlays:
+                v = versions.latest_version(folder)
+                if not any(l.get("id", "").startswith("ov") for l in (versions.read_json(folder / v / "params.json", {}) or {}).get("layers", [])):
+                    (folder / ".no-overlays").write_text("no caption overlay found (12 October 2026)\n", encoding="utf-8")
+        seg["motion"] = mid
+        return seg
+    plates = [s for s in segments if s["kind"] == "plate"]
+    with ThreadPoolExecutor(max_workers=a.jobs) as pool:
+        list(pool.map(plate, plates))
+    root = montage.root()
+    clips = []
+    for s in segments:
+        frames = s["b"] - s["a"]
+        if s["kind"] == "black":
+            clips.append({"kind": "file", "path": str(black_clip(frames, root)), "mute": True})
+        else:
+            folder = workshop / "motions" / s["motion"]
+            version = versions.latest_version(folder) if s["kind"] == "plate" else best_version(folder)
+            clips.append({"kind": "motion", "motion": s["motion"], "version": version, "in": 0,
+                          "out": frames / FPS, "mute": True})
+    spec = {"id": a.id, "fps": FPS, "formats": ["16x9"], "clips": clips}
+    plan = montage.plan(spec, workshop / "motions")
+    out_dir = root / a.id / versions.stamp().replace(" ", "_").replace(",", "")
+    project = montage.cook(plan, out_dir, "16x9")
+    silent = render(project, out_dir / "film-silent.mp4")
+    final = silent
+    if a.audio:
+        final = out_dir / "film.mp4"
+        subprocess.run(["ffmpeg", "-v", "error", "-y", "-i", str(silent), "-i", a.audio, "-map", "0:v", "-map", "1:a",
+                        "-c:v", "copy", "-c:a", "aac", "-b:a", "256k", "-shortest", str(final)], check=True)
+    rep = {"segments": len(segments), "plates": len(plates), "motions": sum(1 for s in segments if s["kind"] == "motion"),
+           "frames": plan["frames"], "reference_frames": total,
+           "rhythm": rhythm_presence([c["frame"] for c in det["cuts"] if c["kind"] != "flash"], str(final), ref_video=video),
+           "film": str(final), "plan": [{k: s.get(k) for k in ("kind", "motion", "a", "b")} for s in segments]}
+    (out_dir / "film-report.json").write_text(json.dumps(rep, indent=1) + "\n", encoding="utf-8")
+    print(json.dumps({k: rep[k] for k in ("segments", "plates", "motions", "frames", "reference_frames", "rhythm", "film")}, indent=1))
+
+
+if __name__ == "__main__":
+    main()

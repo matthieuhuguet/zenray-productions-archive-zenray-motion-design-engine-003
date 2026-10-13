@@ -1,0 +1,70 @@
+{
+  "id": "highpass_sweep",
+  "family": "filter",
+  "kind": "effect",
+  "description": "Resonant highpass whose cutoff glides from a start to an end frequency. Thinning builds, telephone moves, risers. (12 October 2026)",
+  "tags": [
+    "effect",
+    "filter",
+    "highpass",
+    "sweep",
+    "build"
+  ],
+  "sources": [
+    {
+      "what": "biquad magnitude responses",
+      "url": "https://www.w3.org/TR/audio-eq-cookbook/",
+      "reference": "R. Bristow-Johnson, Audio EQ Cookbook (formulas placed in the public domain by the author)",
+      "licence": "public domain (formulas), code original"
+    }
+  ],
+  "licence": "original",
+  "params": [
+    {
+      "name": "start_hz",
+      "unit": "Hz",
+      "min": 20.0,
+      "max": 16000.0,
+      "default": 80.0,
+      "scale": "log",
+      "description": "cutoff at the start of the window"
+    },
+    {
+      "name": "end_hz",
+      "unit": "Hz",
+      "min": 20.0,
+      "max": 16000.0,
+      "default": 2000.0,
+      "scale": "log",
+      "description": "cutoff reached"
+    },
+    {
+      "name": "sweep_s",
+      "unit": "s",
+      "min": 0.02,
+      "max": 1.0,
+      "default": 0.3,
+      "scale": "log",
+      "description": "glide time constant"
+    },
+    {
+      "name": "q",
+      "unit": "Q",
+      "min": 0.5,
+      "max": 12.0,
+      "default": 1.0,
+      "scale": "log",
+      "description": "resonance"
+    },
+    {
+      "name": "out_db",
+      "unit": "dB",
+      "min": -24.0,
+      "max": 12.0,
+      "default": 0.0,
+      "scale": "lin",
+      "description": "output gain"
+    }
+  ],
+  "date": "12 October 2026"
+}

@@ -1,0 +1,301 @@
+# 12 October 2026, 12:05 CEST: method search for plate shots (zenray-methodology): sixteen methods with distinct
+# principles, each producing a frame of the plate from measurements, measured by black-and-white masks whose
+# thresholds come from the reference only (luminance mask and edge mask, IoU), plus SSIM for information.
+# Phase P1 = one mid frame per test shot; P2 = 12 frames across the shot (strip). One board per shot and phase.
+# Each method declares its doctrine level: L0 palette, L1 grade/layout, L2 abstract structure, L3 trace
+# (needs Matthieu's agreement), L4 copy (forbidden in a deliverable; calibration ceiling only).
+# Run: python -I Scripts/PlateMethods.py --slug onekey-pro-2 --phase P1 --out <methods dir>
+from __future__ import annotations
+
+import argparse
+import json
+import sys
+from pathlib import Path
+
+import cv2
+import numpy as np
+from PIL import Image, ImageDraw, ImageFont
+from skimage.metrics import structural_similarity
+
+ENGINE = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(ENGINE))
+from zrmd import settings  # noqa: E402
+from zrmd.media import frame_at  # noqa: E402
+
+W, H = 480, 270
+RNG = np.random.default_rng(7)
+
+
+# ---------- measurement (thresholds from the reference only) ----------
+def masks(ref: np.ndarray):
+    g = cv2.cvtColor(ref, cv2.COLOR_RGB2GRAY)
+    lum_t = float(np.median(g))
+    e = cv2.Canny(cv2.GaussianBlur(g, (3, 3), 0), 60, 140)
+    return lum_t, (g > lum_t), cv2.dilate(e, np.ones((3, 3), np.uint8)) > 0
+
+
+def measure(ref: np.ndarray, out: np.ndarray) -> dict:
+    lum_t, ref_lum, ref_edge = masks(ref)
+    g = cv2.cvtColor(out, cv2.COLOR_RGB2GRAY)
+    out_lum = g > lum_t
+    out_edge = cv2.dilate(cv2.Canny(cv2.GaussianBlur(g, (3, 3), 0), 60, 140), np.ones((3, 3), np.uint8)) > 0
+    def iou(a, b):
+        u = (a | b).sum()
+        return float((a & b).sum() / u) if u else 1.0
+    return {"iou_lum": round(iou(ref_lum, out_lum), 3), "iou_edge": round(iou(ref_edge, out_edge), 3),
+            "ssim": round(float(structural_similarity(ref, out, channel_axis=2, data_range=255)), 3)}
+
+
+# ---------- methods ----------
+def palette(ref, k=6):
+    Z = ref.reshape(-1, 3).astype(np.float32)
+    _, lab, cen = cv2.kmeans(Z, k, None, (cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER, 20, 1.0), 3, cv2.KMEANS_PP_CENTERS)
+    order = np.argsort(-np.bincount(lab.ravel(), minlength=k))
+    return cen[order].astype(np.uint8)
+
+
+def m01_grid16(ref):
+    return cv2.resize(cv2.resize(ref, (16, 9), interpolation=cv2.INTER_AREA), (W, H), interpolation=cv2.INTER_CUBIC)
+
+
+def m02_grid64(ref):
+    return cv2.resize(cv2.resize(ref, (64, 36), interpolation=cv2.INTER_AREA), (W, H), interpolation=cv2.INTER_CUBIC)
+
+
+def m03_posterize(ref, k=8):
+    Z = ref.reshape(-1, 3).astype(np.float32)
+    _, lab, cen = cv2.kmeans(Z, k, None, (cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER, 20, 1.0), 2, cv2.KMEANS_PP_CENTERS)
+    q = cen[lab.ravel()].reshape(ref.shape).astype(np.uint8)
+    return cv2.medianBlur(q, 7)
+
+
+def m04_duotone(ref):
+    p = palette(ref, 4)
+    dark, light = (p[np.argmin(p.sum(1))], p[np.argmax(p.sum(1))])
+    g = cv2.GaussianBlur(cv2.cvtColor(ref, cv2.COLOR_RGB2GRAY), (9, 9), 0).astype(np.float32) / 255
+    return (dark[None, None] * (1 - g[..., None]) + light[None, None] * g[..., None]).astype(np.uint8)
+
+
+def m05_luma_layers(ref):
+    g = cv2.cvtColor(ref, cv2.COLOR_RGB2GRAY)
+    out = np.zeros_like(ref)
+    for lo, hi in ((0, 60), (60, 140), (140, 256)):
+        m = (g >= lo) & (g < hi)
+        if m.any():
+            out[m] = ref[m].reshape(-1, 3).mean(axis=0)
+    return cv2.GaussianBlur(out, (15, 15), 0)
+
+
+def m06_standin_device(ref):
+    """2D proxy of a generic 3D device stand-in: rounded slab where the brightest large mass sits, palette colours."""
+    g = cv2.cvtColor(ref, cv2.COLOR_RGB2GRAY)
+    m = (g > np.percentile(g, 70)).astype(np.uint8)
+    n, lab, st, _ = cv2.connectedComponentsWithStats(m)
+    out = np.full_like(ref, palette(ref, 3)[0])
+    if n > 1:
+        k = 1 + int(np.argmax(st[1:, 4]))
+        x, y, w, h = st[k][:4]
+        img = Image.fromarray(out); d = ImageDraw.Draw(img)
+        p = palette(ref, 4)
+        d.rounded_rectangle([x, y, x + w, y + h], radius=int(min(w, h) * 0.18), fill=tuple(int(v) for v in p[-1]))
+        d.rounded_rectangle([x + w * 0.08, y + h * 0.08, x + w * 0.92, y + h * 0.92], radius=int(min(w, h) * 0.12), fill=tuple(int(v) for v in p[1]))
+        out = np.asarray(img)
+    return cv2.GaussianBlur(out, (5, 5), 0)
+
+
+def m07_primitives(ref, n=96, tries=40):
+    """Greedy shape fitting (rectangles and ellipses, mean colour), the 'primitive' principle, small n."""
+    out = np.full_like(ref, ref.reshape(-1, 3).mean(axis=0).astype(np.uint8)).astype(np.float32)
+    target = ref.astype(np.float32)
+    for _ in range(n):
+        best = None
+        err0 = np.abs(out - target).sum(axis=2)
+        for _ in range(tries):
+            cx, cy = RNG.integers(0, W), RNG.integers(0, H)
+            rw, rh = RNG.integers(6, W // 3), RNG.integers(6, H // 3)
+            mask = np.zeros((H, W), np.uint8)
+            if RNG.random() < 0.5:
+                cv2.ellipse(mask, (int(cx), int(cy)), (int(rw), int(rh)), float(RNG.uniform(0, 180)), 0, 360, 1, -1)
+            else:
+                cv2.rectangle(mask, (int(cx - rw), int(cy - rh)), (int(cx + rw), int(cy + rh)), 1, -1)
+            mk = mask.astype(bool)
+            if mk.sum() < 20:
+                continue
+            col = target[mk].mean(axis=0)
+            gain = float((err0[mk] - np.abs(col - target[mk]).sum(axis=1)).sum())
+            if best is None or gain > best[0]:
+                best = (gain, mk, col)
+        if best and best[0] > 0:
+            out[best[1]] = best[2]
+    return out.astype(np.uint8)
+
+
+def m08_lowpoly(ref, n=500):
+    g = cv2.cvtColor(ref, cv2.COLOR_RGB2GRAY)
+    pts = cv2.goodFeaturesToTrack(g, n, 0.01, 6)
+    pts = pts.reshape(-1, 2) if pts is not None else np.zeros((0, 2))
+    border = [(0, 0), (W - 1, 0), (0, H - 1), (W - 1, H - 1), (W // 2, 0), (W // 2, H - 1), (0, H // 2), (W - 1, H // 2)]
+    pts = np.vstack([pts, border])
+    sub = cv2.Subdiv2D((0, 0, W, H))
+    for p in pts:
+        sub.insert((float(min(W - 1, p[0])), float(min(H - 1, p[1]))))
+    out = np.zeros_like(ref)
+    for t in sub.getTriangleList():
+        tri = np.array(t, np.int32).reshape(3, 2)
+        if (tri < -1).any() or (tri[:, 0] > W).any() or (tri[:, 1] > H).any():
+            continue
+        mask = np.zeros((H, W), np.uint8); cv2.fillConvexPoly(mask, tri, 1)
+        if mask.any():
+            out[mask.astype(bool)] = ref[mask.astype(bool)].mean(axis=0)
+    return out
+
+
+def m09_own_library(ref):
+    """Retrieval from Matthieu's own renders (closest colour histogram), never from third-party media."""
+    lib = sorted(Path("/Users/zenray/Create/Build/Productions/ZenRayHoudini").rglob("*.png"))[:400]
+    if not lib:
+        return np.zeros_like(ref)
+    def hist(img):
+        h = cv2.calcHist([img], [0, 1, 2], None, [8, 8, 8], [0, 256] * 3); return cv2.normalize(h, h).ravel()
+    hr = hist(ref); best = None
+    for p in lib[::4]:
+        try:
+            im = np.asarray(Image.open(p).convert("RGB").resize((W, H)))
+        except Exception:
+            continue
+        d = cv2.compareHist(hr, hist(im), cv2.HISTCMP_BHATTACHARYYA)
+        if best is None or d < best[0]:
+            best = (d, im)
+    return best[1] if best else np.zeros_like(ref)
+
+
+def m10_flow_streaks(ref):
+    """Generative streaks oriented by the reference's structure tensor, coloured by the local mean colour."""
+    g = cv2.cvtColor(ref, cv2.COLOR_RGB2GRAY).astype(np.float32)
+    gx, gy = cv2.Sobel(g, cv2.CV_32F, 1, 0), cv2.Sobel(g, cv2.CV_32F, 0, 1)
+    ang = 0.5 * np.arctan2(2 * cv2.GaussianBlur(gx * gy, (15, 15), 0), cv2.GaussianBlur(gx * gx - gy * gy, (15, 15), 0)) + np.pi / 2
+    low = cv2.GaussianBlur(ref, (31, 31), 0)
+    out = low.copy()
+    for _ in range(2500):
+        x, y = RNG.integers(0, W), RNG.integers(0, H)
+        a = ang[y, x]; L = 10
+        col = tuple(int(v) for v in ref[y, x])
+        cv2.line(out, (int(x - L * np.cos(a)), int(y - L * np.sin(a))), (int(x + L * np.cos(a)), int(y + L * np.sin(a))), col, 1, cv2.LINE_AA)
+    return out
+
+
+def m11_noise_modulated(ref):
+    noise = cv2.GaussianBlur(RNG.random((H, W)).astype(np.float32), (0, 0), 3)
+    noise = (noise - noise.min()) / (noise.max() - noise.min())
+    low = cv2.resize(cv2.resize(ref, (32, 18), interpolation=cv2.INTER_AREA), (W, H), interpolation=cv2.INTER_CUBIC).astype(np.float32)
+    return np.clip(low * (0.8 + 0.4 * noise[..., None]), 0, 255).astype(np.uint8)
+
+
+def m12_lineart(ref):
+    g = cv2.cvtColor(ref, cv2.COLOR_RGB2GRAY)
+    e = cv2.Canny(cv2.GaussianBlur(g, (3, 3), 0), 60, 140)
+    base = cv2.resize(cv2.resize(ref, (16, 9), interpolation=cv2.INTER_AREA), (W, H), interpolation=cv2.INTER_CUBIC)
+    out = base.copy(); out[e > 0] = (235, 235, 235)
+    return out
+
+
+def m13_type_plate(ref):
+    out = m01_grid16(ref).copy()
+    img = Image.fromarray(out); d = ImageDraw.Draw(img)
+    font = ImageFont.truetype(str(ENGINE / "datasets" / "fonts" / "files" / "Lexend" / "Lexend[wght].ttf"), 54)
+    g = cv2.cvtColor(ref, cv2.COLOR_RGB2GRAY)
+    y = int(np.argmax(g.mean(axis=1)))
+    d.text((W // 2, min(H - 40, max(20, y))), "ZENRAY", fill=(245, 245, 245), font=font, anchor="mm")
+    return np.asarray(img)
+
+
+def m14_placeholder(ref):
+    out = m01_grid16(ref).copy()
+    img = Image.fromarray(out); d = ImageDraw.Draw(img)
+    d.rectangle([12, 12, W - 12, H - 12], outline=(255, 255, 255), width=2)
+    d.text((24, 24), "SLOT: your footage", fill=(255, 255, 255))
+    return np.asarray(img)
+
+
+def m15_copy_ceiling(ref):
+    return cv2.bilateralFilter(ref, 9, 40, 9)
+
+
+def m16_ellipse_regions(ref, k=10):
+    """Regions of a posterised plate, each redrawn as its best-fit ellipse (shape kept only as ellipses)."""
+    Z = ref.reshape(-1, 3).astype(np.float32)
+    _, lab, cen = cv2.kmeans(Z, k, None, (cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER, 20, 1.0), 2, cv2.KMEANS_PP_CENTERS)
+    lab = lab.reshape(H, W)
+    out = np.full_like(ref, cen[np.bincount(lab.ravel()).argmax()].astype(np.uint8))
+    for i in np.argsort(-np.bincount(lab.ravel(), minlength=k)):
+        m = (lab == i).astype(np.uint8)
+        n, cl, st, _ = cv2.connectedComponentsWithStats(m)
+        for j in range(1, n):
+            if st[j, 4] < 80:
+                continue
+            ys, xs = np.nonzero(cl == j)
+            pts = np.stack([xs, ys], 1).astype(np.float32)
+            if len(pts) >= 5:
+                (cx, cy), (a, b), ang = cv2.fitEllipse(pts)
+                cv2.ellipse(out, (int(cx), int(cy)), (int(a / 2), int(b / 2)), ang, 0, 360, tuple(int(v) for v in cen[i]), -1, cv2.LINE_AA)
+    return out
+
+
+METHODS = [
+    ("M01", "grille couleur 16x9 (actuelle)", "L1", m01_grid16), ("M02", "grille couleur 64x36", "L2", m02_grid64),
+    ("M03", "postérisation 8 couleurs", "L3", m03_posterize), ("M04", "bichromie de luminance", "L3", m04_duotone),
+    ("M05", "trois couches de luminance floues", "L2", m05_luma_layers), ("M06", "doublure d'appareil générique", "L1", m06_standin_device),
+    ("M07", "primitives ajustées (96 formes)", "L2", m07_primitives), ("M08", "low poly 500 points", "L3", m08_lowpoly),
+    ("M09", "banque d'images de Matthieu", "L0", m09_own_library), ("M10", "traits génératifs orientés", "L2", m10_flow_streaks),
+    ("M11", "bruit modulé 32x18", "L2", m11_noise_modulated), ("M12", "dessin au trait", "L3", m12_lineart),
+    ("M13", "plaque typographique", "L1", m13_type_plate), ("M14", "emplacement annoncé", "L1", m14_placeholder),
+    ("M15", "copie filtrée (plafond, interdite)", "L4", m15_copy_ceiling), ("M16", "régions en ellipses", "L2", m16_ellipse_regions),
+]
+
+TEST_SHOTS = [("aluminium", 6.283, 7.45), ("chips", 15.883, 19.6), ("hand", 34.567, 39.4)]
+
+
+def board(rows, path: Path, title: str):
+    font = ImageFont.truetype(str(ENGINE / "fonts" / "InterVariable.ttf"), 14)
+    tw, th = 240, 135
+    cols = 6
+    n = len(rows)
+    img = Image.new("RGB", (cols * (tw + 6) + 6, 30 + ((n + cols - 1) // cols) * (th + 44)), (30, 30, 30))
+    d = ImageDraw.Draw(img); d.text((6, 6), title, fill=(240, 240, 240), font=font)
+    for i, (label, im, meas) in enumerate(rows):
+        x, y = 6 + (i % cols) * (tw + 6), 30 + (i // cols) * (th + 44)
+        img.paste(Image.fromarray(im).resize((tw, th)), (x, y))
+        d.text((x, y + th + 2), label, fill=(240, 220, 120), font=font)
+        if meas:
+            d.text((x, y + th + 20), f"lum {meas['iou_lum']:.2f} edge {meas['iou_edge']:.2f} ssim {meas['ssim']:.2f}", fill=(200, 200, 200), font=font)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    img.save(path)
+
+
+def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--slug", default="onekey-pro-2"); ap.add_argument("--phase", default="P1"); ap.add_argument("--out", required=True)
+    a = ap.parse_args()
+    meta = json.loads((settings.path("workshop") / "references" / a.slug / "reference.json").read_text(encoding="utf-8"))
+    video = str(settings.path("refcache") / a.slug / meta["file_name"])
+    out_dir = Path(a.out); results = {}
+    for name, s, e in TEST_SHOTS:
+        times = [(s + e) / 2] if a.phase == "P1" else list(np.linspace(s + 0.05, e - 0.05, 12))
+        rows = []
+        per = {mid: [] for mid, *_ in METHODS}
+        for t in times:
+            ref = frame_at(video, float(t), W, H)
+            for mid, label, level, fn in METHODS:
+                outp = fn(ref)
+                m = measure(ref, outp); per[mid].append(m)
+                if t == times[len(times) // 2]:
+                    rows.append((f"{mid} {level} {label}"[:34], outp, m))
+        # the board never stores the reference picture outside the scratchpad
+        board(rows, out_dir / f"{a.phase}-{name}.png", f"{a.phase} {name} ({len(times)} frames): masks from the reference only")
+        results[name] = {mid: {k: round(float(np.mean([x[k] for x in per[mid]])), 3) for k in ("iou_lum", "iou_edge", "ssim")} for mid in per}
+    (out_dir / f"{a.phase}-results.json").write_text(json.dumps(results, indent=1) + "\n", encoding="utf-8")
+    print(json.dumps(results, indent=1))
+
+
+if __name__ == "__main__":
+    main()

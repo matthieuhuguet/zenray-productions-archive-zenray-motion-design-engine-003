@@ -1,0 +1,76 @@
+# Sound bank, differentiable procedural blocks (12 October 2026)
+
+Each block is a torch module whose parameters are bounded (sigmoid to [min, max], linear or log), so the gradient
+fitter `zrmd/audio/dfit.py` can move them freely. Noise is drawn once from a fixed seed per block, so a render is
+reproducible bit for bit within a process (one float32 ulp across processes).
+
+| Path | Role |
+|---|---|
+| `<id>/block.py` | the single source: `META` (family, description, tags, sources, licence) and the class with `PARAMS` (name, unit, min, max, default, scale, description) and `synth` |
+| `<id>/block.json` | generated from block.py by `Scripts/BuildSoundBank.py`, never edited by hand |
+| `<id>/demo.wav` | render at the defaults, 1 s, 48 kHz, float32 |
+| `index.json` | generated list of blocks |
+| `verify-report.json` | last green run of `Scripts/VerifySoundBank.py --json` |
+
+Blocks (12 October 2026): `sine_env` (sine, exponential glide, attack and 60 dB decay), `filtered_noise_burst`
+(fixed-seed noise through a sweeping Gaussian log-frequency band), `fm_bell` (two-operator FM, decaying index).
+
+Add a block: create `<id>/block.py` with `META`, a `Block` subclass whose `ID == "<id>"` and `BLOCK = <class>`, then
+`python -I Scripts/BuildSoundBank.py --blocks <id>` and `python -I Scripts/VerifySoundBank.py --blocks <id>`; add a
+graded red target for it in `datasets/sfx-params.json` at `bank.verify.redTargets`.
+
+Use: `bank.render_block(id, params)`, `bank.render_chain(chain)` and `dfit.fit(target_window, [ids])`. Every setting
+(loss, fitter, verifier thresholds) lives in `datasets/sfx-params.json` under `bank`, `ploss` and `dfit`.
+
+Licence: every current block is original, derived from the mathematics (FM from Chowning 1973). Copied code is only
+accepted from MIT, BSD, ISC, Apache-2.0, CC0 or public domain sources, with its URL in `META.sources`. No reference
+audio is stored here.
+
+## Transient and noise blocks, task A1 (12 October 2026)
+
+27 blocks, all original (derived from the mathematics), sharing one DSP module `zrmd/audio/sfxdsp.py` (decay, bell,
+band, low-pass, high-pass, tilt, STFT noise filters, hit trains, R1 patterns, modal partials, TR-808 hat source, swept
+band plus tone). Variation that looks random (typing jitter, accents, grain pitches, crackle positions) is a fixed R1
+low-discrepancy pattern scaled by a parameter, never a random draw; counts are continuous (`sfxdsp.soft_count`).
+
+| Family | Blocks |
+|---|---|
+| drum | kick, sub_drop, snare, clap, tom_drum |
+| cymbal | hihat_closed, hihat_open, crash_cymbal |
+| impact | impact_layered, thud, wood_knock |
+| ui | ui_click, ui_tick |
+| foley | key_press, keyboard_typing, shaker, paper_rustle, cloth_swish |
+| whoosh | whoosh, swoosh_tonal |
+| riser | riser, downlifter, reverse_swell |
+| glitch | glitch_stutter |
+| noise, ambience | static_crackle, room_tone, wind |
+
+Verify only these blocks with their contrasts (12 October 2026):
+`python -I Scripts/VerifySoundBank.py --blocks kick,snare,... --cross contrast` (each target fitted by its own block,
+each red target by the two wrong blocks named in `bank.verify.contrast`). `Scripts/SmokeSoundBlocks.py` renders every
+block and checks that each parameter receives a gradient.
+
+## Tonal and effect blocks, task A2 (12 October 2026)
+
+31 blocks, all original (derived from the published mathematics, sources in each `META.sources`), sharing one DSP
+module `zrmd/audio/fxdsp.py` (polyBLEP saw and pulse, modal partials, RBJ biquad magnitudes on the STFT grid, FFT
+convolution, fractional delay by phase, exponential RMS followers, time-varying fractional delay, test exciter).
+
+| Family | Blocks |
+|---|---|
+| modal | modal_ding, chime_bar, bell_modal, marimba_bar |
+| fm, physical, additive | fm_epiano, pluck_ks (Karplus-Strong exact in frequency), additive_harmonic |
+| subtractive, bass | supersaw, pad_saw, pulse_lead, bass_saw, sub_808 |
+| oscillator, notification | tone_glide, notify_two_tone, notify_arpeggio, notify_chirp, ui_blip_tri |
+| filter (effect) | lowpass_sweep, highpass_sweep, bandpass_sweep, peak_eq |
+| reverb, delay (effect) | reverb_noise_tail, reverb_fdn (8-line FDN exact in frequency), delay_echo |
+| distortion, dynamics (effect) | saturation, transient_shaper, compressor |
+| modulation, stereo (effect) | chorus, tremolo, stereo_pan, stereo_width |
+
+Effects (`META.kind == "effect"`, class `fxdsp.EffectBlock`): rendered alone they process a fixed deterministic test
+exciter (`fxdsp.EXCITER`, a 220 Hz harmonic tone with noise at 0.02 s and a noise click at 0.45 s), so they are built,
+verified and fitted like any block. In a chain an effect entry processes the running sum of the entries before it
+(insert on the bus): `{"blocks": [{"block": "pluck_ks"}, {"block": "delay_echo"}, {"block": "stereo_pan"}]}`.
+Stereo blocks give their left channel in a mono chain; `fxdsp.render_chain_stereo(chain)` renders both channels.
+Proof both ways of the chain insert: `python -I Scripts/CheckA2Chain.py`. Block list: `Scripts/A2BlockList.txt`.
+`index.json` is written under the lock `.index.lock` (atomic rename), so A1 and A2 can build at the same time.

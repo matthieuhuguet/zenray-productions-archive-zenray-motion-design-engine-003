@@ -1,0 +1,87 @@
+{
+  "id": "ui_click",
+  "family": "ui",
+  "description": "UI click: very short band-passed noise click with a sine at the band centre. (12 October 2026)",
+  "tags": [
+    "ui",
+    "click",
+    "tap",
+    "toggle",
+    "transient",
+    "short"
+  ],
+  "sources": [
+    {
+      "what": "filtered noise click and sine",
+      "url": null,
+      "licence": "original (derived from the mathematics, no code copied)"
+    }
+  ],
+  "licence": "original",
+  "params": [
+    {
+      "name": "center_hz",
+      "unit": "Hz",
+      "min": 500.0,
+      "max": 14000.0,
+      "default": 3000.0,
+      "scale": "log",
+      "description": "band centre and sine pitch"
+    },
+    {
+      "name": "bw_oct",
+      "unit": "octaves",
+      "min": 0.3,
+      "max": 5.0,
+      "default": 1.5,
+      "scale": "log",
+      "description": "band width"
+    },
+    {
+      "name": "decay_s",
+      "unit": "s (T60)",
+      "min": 0.0008,
+      "max": 0.04,
+      "default": 0.008,
+      "scale": "log",
+      "description": "time to fall 60 dB"
+    },
+    {
+      "name": "attack_s",
+      "unit": "s",
+      "min": 0.0001,
+      "max": 0.003,
+      "default": 0.0003,
+      "scale": "log",
+      "description": "linear attack"
+    },
+    {
+      "name": "tone_db",
+      "unit": "dB re noise",
+      "min": -40.0,
+      "max": 6.0,
+      "default": -10.0,
+      "scale": "lin",
+      "description": "sine level"
+    },
+    {
+      "name": "amp_db",
+      "unit": "dBFS",
+      "min": -60.0,
+      "max": 0.0,
+      "default": -14.0,
+      "scale": "lin",
+      "description": "peak level of the main layer"
+    },
+    {
+      "name": "onset_s",
+      "unit": "s",
+      "min": 0.0,
+      "max": 0.2,
+      "default": 0.02,
+      "scale": "lin",
+      "description": "start time in the window"
+    }
+  ],
+  "date": "12 October 2026"
+}

@@ -1,0 +1,95 @@
+{
+  "id": "riser",
+  "family": "riser",
+  "description": "Riser: noise band and sine sweeping up together while the level grows, cut at the end. (12 October 2026)",
+  "tags": [
+    "riser",
+    "build up",
+    "tension",
+    "sweep",
+    "transition"
+  ],
+  "sources": [
+    {
+      "what": "swept filtered noise and sine (sfxdsp.swept_band_tone)",
+      "url": null,
+      "licence": "original (derived from the mathematics, no code copied)"
+    }
+  ],
+  "licence": "original",
+  "params": [
+    {
+      "name": "start_hz",
+      "unit": "Hz",
+      "min": 60.0,
+      "max": 4000.0,
+      "default": 300.0,
+      "scale": "log",
+      "description": "centre at the start"
+    },
+    {
+      "name": "end_hz",
+      "unit": "Hz",
+      "min": 500.0,
+      "max": 16000.0,
+      "default": 6000.0,
+      "scale": "log",
+      "description": "centre at the end"
+    },
+    {
+      "name": "bw_oct",
+      "unit": "octaves",
+      "min": 0.3,
+      "max": 4.0,
+      "default": 1.2,
+      "scale": "log",
+      "description": "noise band width"
+    },
+    {
+      "name": "duration_s",
+      "unit": "s",
+      "min": 0.15,
+      "max": 0.85,
+      "default": 0.7,
+      "scale": "log",
+      "description": "length of the rise"
+    },
+    {
+      "name": "curve",
+      "unit": "power",
+      "min": 0.5,
+      "max": 5.0,
+      "default": 2.0,
+      "scale": "log",
+      "description": "level growth exponent"
+    },
+    {
+      "name": "tone_db",
+      "unit": "dB re noise",
+      "min": -40.0,
+      "max": 0.0,
+      "default": -10.0,
+      "scale": "lin",
+      "description": "sine level"
+    },
+    {
+      "name": "amp_db",
+      "unit": "dBFS",
+      "min": -60.0,
+      "max": 0.0,
+      "default": -14.0,
+      "scale": "lin",
+      "description": "peak level of the main layer"
+    },
+    {
+      "name": "onset_s",
+      "unit": "s",
+      "min": 0.0,
+      "max": 0.12,
+      "default": 0.02,
+      "scale": "lin",
+      "description": "start time in the window"
+    }
+  ],
+  "date": "12 October 2026"
+}

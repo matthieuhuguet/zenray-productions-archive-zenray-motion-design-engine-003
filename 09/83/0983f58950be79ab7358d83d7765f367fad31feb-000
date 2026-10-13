@@ -1,0 +1,58 @@
+# 12 October 2026, 18:40 CEST: measure every font file of datasets/fonts/index.json (F1 font dataset).
+# Writes datasets/fonts/features.jsonl (one zrmd.vector.features record per file, sorted by file) and
+# datasets/fonts/features-index.json (family -> files, usable flag, signature, numeric vector), on 16 workers.
+# Usage: ~/.venvs/zenray-motion/bin/python -I Scripts/BuildFontFeatures.py [--limit N]
+from __future__ import annotations
+
+import argparse
+import json
+import sys
+import time
+from concurrent.futures import ProcessPoolExecutor
+from pathlib import Path
+
+REPO = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(REPO))
+
+from zrmd import settings  # noqa: E402
+from zrmd.vector import features as F  # noqa: E402
+from zrmd.vector import render as R  # noqa: E402
+
+FONTS = REPO / "datasets" / "fonts"
+
+
+def main() -> int:
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--limit", type=int, default=0)
+    args = ap.parse_args()
+    cfg = settings.get("vector.features")
+    entries = json.loads((FONTS / "index.json").read_text())
+    entries.sort(key=lambda e: e["file"])
+    if args.limit:
+        entries = entries[:args.limit]
+    t0 = time.time()
+    with ProcessPoolExecutor(cfg["workers"]) as pool:
+        recs = list(pool.map(F.measure_font, entries, chunksize=4))
+    with (FONTS / "features.jsonl").open("w", encoding="utf-8") as fh:
+        for r in recs:
+            fh.write(json.dumps(r, ensure_ascii=False, sort_keys=True) + "\n")
+    fams: dict = {}
+    for r in recs:
+        f = fams.setdefault(r["family"], {"family": r["family"], "category": r.get("category"),
+                                          "licence_class": r.get("licence_class"), "files": []})
+        f["files"].append({"file": r["file"], "usable": r.get("usable", False), "variable": r.get("variable"),
+                           "axes": [a["tag"] for a in r.get("axes", [])], "signature": r.get("signature"),
+                           "vector": F.vector_of(r), "error": r.get("error")})
+    index = {"schema": "zrmd/font-features@1", "date": "12 October 2026", "specimen": cfg["specimen"],
+             "vector_fields": cfg["vector"], "versions": R.versions(), "families": sorted(fams.values(), key=lambda f: f["family"])}
+    (FONTS / "features-index.json").write_text(json.dumps(index, indent=1, ensure_ascii=False))
+    usable = sum(r.get("usable", False) for r in recs)
+    fam_usable = sum(any(x["usable"] for x in f["files"]) for f in fams.values())
+    errors = [r["name"] for r in recs if r.get("error")]
+    print(json.dumps({"files": len(recs), "usable_files": usable, "families": len(fams), "usable_families": fam_usable,
+                      "errors": errors, "seconds": round(time.time() - t0, 1)}))
+    return 0 if fam_usable >= cfg.get("min_families", 400) and not errors else 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())

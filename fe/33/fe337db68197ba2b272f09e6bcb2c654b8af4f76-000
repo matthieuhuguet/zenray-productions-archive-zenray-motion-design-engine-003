@@ -1,0 +1,38 @@
+# 12 October 2026: compressor, feed-forward RMS compressor approximation: level = exponential RMS follower (one time
+# constant time_ms standing for attack and release), gain reduction (1 - 1/ratio) * w * softplus((level - threshold)
+# / w) with a soft knee of width w = knee_db / 4 + 0.25, then makeup. Smooth everywhere, so all five controls receive
+# gradients. FR : compresseur approché, genou doux, différentiable partout.
+import math
+
+import torch
+
+from zrmd.audio.bank import db_to_amp, stft_filter
+from zrmd.audio import fxdsp as F
+from zrmd.audio.fxdsp import EffectBlock
+from zrmd.audio.fxdsp import param as P
+
+META = {"family": "dynamics", "kind": "effect",
+        "description": "Feed-forward RMS compressor approximation (threshold, ratio, soft knee, one time constant, makeup). Glue, sustain, pumping, levelling. (12 October 2026)",
+        "tags": ["effect", "dynamics", "compressor", "glue", "sustain"],
+        "sources": [{"what": "soft-knee gain computer", "url": None, "reference": "D. Giannoulis, M. Massberg, J. Reiss, Digital dynamic range compressor design, JAES 60(6), 2012", "licence": F.SOURCE}],
+        "licence": "original"}
+
+
+class Compressor(EffectBlock):
+    ID = "compressor"
+    PARAMS = [
+        P("threshold_db", "dBFS", -48, 0, -28, "lin", "level where compression starts"),
+        P("ratio", "x", 1.0, 20.0, 6.0, "log", "compression ratio"),
+        P("knee_db", "dB", 0.0, 12.0, 6.0, "lin", "soft knee width"),
+        P("time_ms", "ms", 1.0, 300.0, 30.0, "log", "RMS follower time constant (attack and release)"),
+        P("makeup_db", "dB", 0, 24, 6, "lin", "makeup gain (default 6, 12 October 2026: peak under 0 dBFS)"),
+    ]
+
+    def fx(self, v, x, t, sr):
+        level = 20.0 * torch.log10(F.env_rms(x, v["time_ms"] * 1e-3, sr))
+        w = v["knee_db"] / 4.0 + 0.25
+        gr = (1.0 - 1.0 / v["ratio"]) * w * torch.nn.functional.softplus((level - v["threshold_db"]) / w)
+        return x * torch.pow(10.0, (v["makeup_db"] - gr) / 20.0)
+
+
+BLOCK = Compressor

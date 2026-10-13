@@ -1,0 +1,39 @@
+# 12 October 2026: static_crackle, up to 48 tiny noise clicks at fixed R1 positions over duration_s, kept by density
+# against another fixed pattern, with fixed pattern levels, then band-passed: vinyl crackle, static, electric sparks.
+# Derived from the mathematics. FR : crépitement, clics déterministes filtrés.
+import torch
+
+from zrmd.audio import sfxdsp as D
+from zrmd.audio.bank import Block, db_to_amp
+
+K, SALT_POS, SALT_ON, SALT_LEVEL, DENSITY_SHARP, ATTACK_S = 48, 0.13, 0.59, 0.31, 10.0, 0.0001
+TEMPLATE_N = 1440  # 12 October 2026 (A1): 30 ms click template, longer than the 0.02 s longest T60
+META = D.meta("noise", "Static crackle: deterministic sparse noise clicks (density, duration) through a band-pass.", ["crackle", "static", "vinyl", "spark", "electric", "noise"], "deterministic click positions (R1 sequence) and filtered noise")
+
+
+class StaticCrackle(Block):
+    ID = "static_crackle"
+    # 12 October 2026 (A1): stroke pattern, so the fitter guides with a time blur first (see ploss.time_blur_error).
+    FIT = {"screenBlurMs": 25.0, "blurStartMs": 30.0, "blurEndMs": 2.0, "screenSamples": 768,
+           "scanPairs": [["click_s", "amp_db"], ["density", "amp_db"]]}
+    PARAMS = [
+        D.param("density", "fraction", 0.05, 1.0, 0.4, "lin", "share of the 48 click slots that sound"),
+        D.param("duration_s", "s", 0.1, 0.9, 0.7, "log", "span of the clicks"),
+        D.param("center_hz", "Hz", 500, 12000, 3000, "log", "band centre"),
+        D.param("bw_oct", "octaves", 0.5, 6.0, 3.0, "log", "band width"),
+        D.param("click_s", "s (T60)", 0.0008, 0.02, 0.004, "log", "decay of each click"),
+        D.AMP(-14.0), D.ONSET(0.1, 0.02),
+    ]
+
+    def synth(self, v, t, sr):
+        dev = t.device
+        times = v["onset_s"] + v["duration_s"] * D.pattern(K, SALT_POS, dev)
+        w = torch.sigmoid(DENSITY_SHARP * (v["density"] - D.pattern(K, SALT_ON, dev))) * (0.3 + 0.7 * D.pattern(K, SALT_LEVEL, dev))
+        # 12 October 2026 (A1): each click carries its own noise excerpt, placed by an exact delay (sfxdsp.delay_sum).
+        u = D.template_time(t, TEMPLATE_N, sr)  # 13 October 2026: window-independent axis
+        tpl = D.stroke_noise(self, K, TEMPLATE_N, dev) * D.decay(u, 0.0, v["click_s"], ATTACK_S)[None, :]
+        y = D.filtered(D.delay_sum(tpl, times, w, t.shape[0], sr), lambda fr: D.band(fr, v["center_hz"], v["bw_oct"]), sr)
+        return db_to_amp(v["amp_db"]) * y
+
+
+BLOCK = StaticCrackle

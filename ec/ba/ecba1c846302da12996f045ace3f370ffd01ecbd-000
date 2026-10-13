@@ -1,0 +1,23 @@
+{
+  "_doc": "12 October 2026: the parameters the site may change, per recipe family, at most 8 per category (HDA interface law). key: dotted path into params.json ('@id' selects a layer by id); kind: number, color or text. A key that does not resolve in a version is simply not offered. FR : les parametres que le site peut changer, au plus 8 par categorie.",
+  "max_per_category": 8,
+  "recipes": {
+    "textcard": {
+      "layout": [
+        {"key": "layers.@caption.x", "label": "Position X", "kind": "number", "min": 0, "max": 1920, "step": 0.5, "unit": "px"},
+        {"key": "layers.@caption.y", "label": "Position Y", "kind": "number", "min": 0, "max": 1080, "step": 0.5, "unit": "px"},
+        {"key": "layers.@caption.font.size", "label": "Taille du texte", "kind": "number", "min": 24, "max": 240, "step": 0.1, "unit": "px"},
+        {"key": "layers.@caption.font.tracking", "label": "Interlettrage", "kind": "number", "min": -0.1, "max": 0.3, "step": 0.001, "unit": "em"}
+      ],
+      "colour": [
+        {"key": "layers.@bg.color", "label": "Fond", "kind": "color"},
+        {"key": "layers.@caption.color", "label": "Texte", "kind": "color"},
+        {"key": "layers.@caption.shine.base", "label": "Reflet, base", "kind": "color"},
+        {"key": "layers.@caption.shine.highlight", "label": "Reflet, éclat", "kind": "color"}
+      ],
+      "content": [
+        {"key": "layers.@caption.text", "label": "Texte affiché", "kind": "text", "maxLength": 80}
+      ]
+    }
+  }
+}

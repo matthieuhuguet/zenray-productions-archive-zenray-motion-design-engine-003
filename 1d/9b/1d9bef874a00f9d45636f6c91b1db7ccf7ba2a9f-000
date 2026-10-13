@@ -1,0 +1,19 @@
+{
+  "_doc": "12 October 2026: the montage family (assemble motions and local clips into one HyperFrames composition per format). Every tunable value of zrmd.emit.montage lives here once. FR : la famille montage, chaque valeur une seule fois.",
+  "formats": {
+    "16x9": {"width": 1920, "height": 1080},
+    "9x16": {"width": 1080, "height": 1920},
+    "1x1": {"width": 1080, "height": 1080}
+  },
+  "fps": 60,
+  "fit": "contain",
+  "fits": ["contain", "cover"],
+  "background": "#000000",
+  "max_clips": 64,
+  "max_seconds": 600,
+  "id_pattern": "^[a-z0-9][a-z0-9-]{0,47}$",
+  "clip_extensions": [".mp4", ".mov", ".m4v", ".webm"],
+  "root": "/Users/zenray/.claude/tmp/tmp-zenray-motion-design-montages",
+  "_root_doc": "local only, outside the archived workshop: a montage copies local clips (possibly third-party media) into its project, they never reach the cloud",
+  "render_quality": "looks"
+}

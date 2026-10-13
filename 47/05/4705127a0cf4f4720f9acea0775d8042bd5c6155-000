@@ -1,0 +1,63 @@
+# 12 October 2026, 17:05 CEST: reproduce a soft graphic disc (orb, glow) from its measured colour field.
+# One pass = one version: measure (centre, radius per frame; Cartesian interior and polar rim colour fields),
+# build params, cook, render, then score image (SSIM, mean absolute difference) since nothing here is brand content.
+# Run: python -I Scripts/ReproduceOrb.py --slug onekey-pro-2 --start 0 --end 1.45 --motion <workshop>/motions/<id>
+from __future__ import annotations
+
+import argparse
+import json
+import sys
+from pathlib import Path
+
+import numpy as np
+from skimage.metrics import structural_similarity
+
+ENGINE = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(ENGINE))
+from zrmd import settings, versions  # noqa: E402
+from zrmd.analyze.field import measure_orb  # noqa: E402
+from zrmd.emit import hyperframes as hf  # noqa: E402
+from zrmd.media import read_frames  # noqa: E402
+from zrmd.render import lint, render  # noqa: E402
+
+
+def image_score(ref: str, out: str, start: float, duration: float, step: int = 2) -> dict:
+    a = read_frames(ref, 480, 270, start=start, duration=duration)
+    b = read_frames(out, 480, 270, start=0, duration=duration)
+    n = min(len(a), len(b))
+    s = [structural_similarity(a[i], b[i], channel_axis=2, data_range=255) for i in range(0, n, step)]
+    d = [float(np.abs(a[i].astype(float) - b[i].astype(float)).mean()) for i in range(0, n, step)]
+    return {"ssim_mean": round(float(np.mean(s)), 4), "ssim_min": round(float(np.min(s)), 4),
+            "mad_mean": round(float(np.mean(d)), 3), "frames": n}
+
+
+def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--slug", required=True); ap.add_argument("--start", type=float, required=True)
+    ap.add_argument("--end", type=float, required=True); ap.add_argument("--motion", required=True)
+    ap.add_argument("--title", default="Orb ignition, measured field")
+    a = ap.parse_args()
+    meta = json.loads((settings.path("workshop") / "references" / a.slug / "reference.json").read_text(encoding="utf-8"))
+    video = str(settings.path("refcache") / a.slug / meta["file_name"])
+    m = measure_orb(video, a.start, a.end)
+    frames = int(round((a.end - a.start) * 60))
+    params = {"schema": "zrmd/motion@1", "canvas": {"width": 1920, "height": 1080, "fps": 60, "frames": frames}, "fonts": [],
+              "layers": [{"id": "bg", "type": "solid", "color": "#000000", "z": 0},
+                         {"id": "orb", "type": "field", "z": 1, "canvas": [960, 540], "data": m}]}
+    motion = Path(a.motion)
+    vdir = versions.create_version(motion, params, note="measured field: cartesian interior, polar rim")
+    meta_m = versions.read_json(motion / "motion.json", {}) or {}
+    meta_m.update({"id": motion.name, "title": a.title, "recipe": "graphic",
+                   "source": {"slug": a.slug, "start": a.start, "end": a.end}, "tags": ["orb", "glow", "gradient", a.slug]})
+    versions.write_json(motion / "motion.json", meta_m)
+    project = hf.cook(params, vdir)
+    ok = json.loads(lint(project)).get("ok")
+    out = render(project, vdir / "render.mp4")
+    score = image_score(video, str(out), a.start, a.end - a.start)
+    report = {"score": score["ssim_mean"], "dimensions": {"image": score["ssim_mean"]}, "image_detail": score, "lint_ok": ok}
+    (vdir / "fidelity.json").write_text(json.dumps(report, indent=1) + "\n", encoding="utf-8")
+    print(json.dumps({"version": vdir.name, **report}))
+
+
+if __name__ == "__main__":
+    main()

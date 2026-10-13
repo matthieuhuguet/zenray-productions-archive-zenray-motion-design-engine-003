@@ -1,0 +1,45 @@
+# 12 October 2026: tone_glide, a sine (plus an optional second harmonic) that holds start_hz, then glides to end_hz
+# along a smoothstep in log frequency between glide_start_s and glide_start_s + glide_s, with sine vibrato.
+# FR : glissando d'une note à l'autre, vibrato.
+import math
+
+import torch
+
+from zrmd.audio.bank import Block, db_to_amp, envelope, stft_filter
+from zrmd.audio import fxdsp as F
+from zrmd.audio.fxdsp import param as P
+
+META = {"family": "oscillator", "kind": "source",
+        "description": "Sine plus second harmonic holding a note then gliding (smoothstep in log frequency) to another, with vibrato. Portamento, swipes, rising and falling UI tones. (12 October 2026)",
+        "tags": ["tonal", "sine", "glide", "portamento", "vibrato", "ui"],
+        "sources": [{"what": "phase accumulation, smoothstep glide", "url": None, "licence": F.SOURCE}],
+        "licence": "original"}
+
+
+class ToneGlide(Block):
+    ID = "tone_glide"
+    PARAMS = [
+        P("start_hz", "Hz", 80, 6000, 600, "log", "first note"),
+        P("end_hz", "Hz", 80, 6000, 900, "log", "second note"),
+        P("glide_start_s", "s", 0.0, 0.6, 0.1, "lin", "when the glide starts, after the onset"),
+        P("glide_s", "s", 0.01, 0.6, 0.15, "log", "glide duration"),
+        P("vib_rate_hz", "Hz", 0.5, 9.0, 6.0, "lin", "vibrato rate"),
+        P("vib_cents", "cents", 0.0, 60.0, 10.0, "lin", "vibrato depth"),
+        P("h2_db", "dB", -60, 0, -18, "lin", "second harmonic level"),
+        P("decay_s", "s (T60)", 0.1, 6.0, 0.9, "log", "time to fall 60 dB"),
+        P("amp_db", "dBFS", -60, 0, -12, "lin", "peak level"),
+        P("onset_s", "s", 0.0, 0.25, 0.02, "lin", "start time in the window"),
+    ]
+
+    def synth(self, v, t, sr):
+        k = torch.clamp((t - v["onset_s"] - v["glide_start_s"]) / v["glide_s"], 0.0, 1.0)
+        k = k * k * (3.0 - 2.0 * k)
+        f = v["start_hz"] * torch.pow(v["end_hz"] / v["start_hz"], k)
+        f = f * torch.pow(2.0, v["vib_cents"] / 1200.0 * torch.sin(F.TWO_PI * v["vib_rate_hz"] * t))
+        ph = F.TWO_PI * F.frac(F.cycles(f, sr))
+        h2 = db_to_amp(v["h2_db"])
+        y = (torch.sin(ph) + h2 * F.nyquist_mask(2.0 * f, sr) * torch.sin(2.0 * ph)) / (1.0 + h2)
+        return F.amp(v) * envelope(t, v["onset_s"], torch.tensor(0.004), v["decay_s"]) * y
+
+
+BLOCK = ToneGlide

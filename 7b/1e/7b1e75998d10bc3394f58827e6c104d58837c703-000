@@ -1,0 +1,50 @@
+# 12 October 2026 (A4): gated_tone, a sustained harmonic tone chopped by a rhythmic gate (trance gate, sidechain
+# chop): partials at k * f0 (k = 1..16) with a spectral tilt and an odd/even balance, a slow attack/release envelope,
+# multiplied by a periodic gate of rate rate_hz, duty and depth with smooth edges. A single pitch, never a melody.
+# Derived from the mathematics, no code copied. FR : son tenu harmonique haché par un gate rythmique, une seule hauteur.
+import math
+
+import torch
+
+from zrmd.audio import sfxdsp as D
+from zrmd.audio.bank import Block, db_to_amp
+
+H = 16
+META = D.meta("gated", "Gated tone: a sustained harmonic tone (one pitch, tilt, odd/even balance) chopped by a periodic gate with duty, depth and smooth edges.",
+              ["tonal", "gate", "chop", "pad", "lead", "sustained", "rhythmic"], "additive harmonic tone times a smooth periodic gate")
+
+
+class GatedTone(Block):
+    ID = "gated_tone"
+    FIT = {"scanPairs": [["rate_hz", "phase"], ["f0_hz", "tilt_db_oct"]]}
+    PARAMS = [
+        D.param("f0_hz", "Hz", 30, 4000, 784, "log", "fundamental"),
+        D.param("tilt_db_oct", "dB/octave", -24, 6, -9, "lin", "level of partial k relative to the fundamental per octave"),
+        D.param("odd_db", "dB", -30, 30, 0, "lin", "level of the even partials relative to the odd ones (negative = hollow)"),
+        D.param("rate_hz", "Hz", 1, 24, 5.87, "log", "gate frequency (5.87 Hz = sixteenths at 88 BPM)"),
+        D.param("phase", "cycles", 0, 1, 0, "lin", "gate phase at the onset"),
+        D.param("duty", "fraction", 0.1, 0.95, 0.5, "lin", "open part of each gate cycle"),
+        D.param("depth_db", "dB", 0, 60, 30, "lin", "attenuation when the gate is closed"),
+        D.param("edge_ms", "ms", 0.5, 40, 4, "log", "smoothness of the gate edges"),
+        D.param("release_s", "s (T60)", 0.1, 20, 4, "log", "slow decay of the tone"),
+        D.AMP(-18.0), D.ONSET(0.25, 0.02),
+    ]
+
+    def synth(self, v, t, sr):
+        k = torch.arange(1, H + 1, device=t.device, dtype=torch.float32)
+        f = v["f0_hz"] * k
+        gain = torch.pow(10.0, v["tilt_db_oct"] * torch.log2(k) / 20.0) * torch.where(k % 2 == 0, db_to_amp(v["odd_db"]), torch.ones_like(k))
+        gain = gain * (f < 0.45 * sr).float()
+        u = torch.clamp(t - v["onset_s"], min=0.0)
+        tone = (gain[:, None] * torch.sin(2.0 * math.pi * f[:, None] * u[None, :])).sum(0) / torch.sqrt((gain * gain).sum() / 2.0 + 1e-12)
+        cyc = v["rate_hz"] * u + v["phase"]
+        x = cyc - torch.floor(cyc)
+        edge = v["edge_ms"] / 1000.0 * v["rate_hz"]
+        open_ = torch.sigmoid(x / edge) * torch.sigmoid((v["duty"] - x) / edge)
+        floor = db_to_amp(-v["depth_db"])
+        g = floor + (1.0 - floor) * open_
+        env = D.decay(t, v["onset_s"], v["release_s"], 0.002)
+        return db_to_amp(v["amp_db"]) * tone * g * env
+
+
+BLOCK = GatedTone

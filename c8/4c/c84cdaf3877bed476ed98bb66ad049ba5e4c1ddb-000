@@ -1,0 +1,97 @@
+{
+  "id": "sub_808",
+  "family": "bass",
+  "kind": "source",
+  "description": "Sine with an exponential pitch drop from start to end frequency and tanh drive. 808 bass, kicks, sub drops, impacts. (12 October 2026)",
+  "tags": [
+    "tonal",
+    "bass",
+    "sub",
+    "808",
+    "kick",
+    "drop"
+  ],
+  "sources": [
+    {
+      "what": "pitch-swept sine with waveshaping",
+      "url": null,
+      "licence": "original (derived from the published mathematics, no code copied)"
+    }
+  ],
+  "licence": "original",
+  "params": [
+    {
+      "name": "start_hz",
+      "unit": "Hz",
+      "min": 40.0,
+      "max": 400.0,
+      "default": 160.0,
+      "scale": "log",
+      "description": "pitch at the onset"
+    },
+    {
+      "name": "end_hz",
+      "unit": "Hz",
+      "min": 25.0,
+      "max": 120.0,
+      "default": 50.0,
+      "scale": "log",
+      "description": "pitch reached"
+    },
+    {
+      "name": "pitch_decay_s",
+      "unit": "s",
+      "min": 0.005,
+      "max": 0.5,
+      "default": 0.06,
+      "scale": "log",
+      "description": "pitch fall time constant"
+    },
+    {
+      "name": "drive",
+      "unit": "x",
+      "min": 1.0,
+      "max": 10.0,
+      "default": 2.0,
+      "scale": "log",
+      "description": "tanh drive"
+    },
+    {
+      "name": "attack_s",
+      "unit": "s",
+      "min": 0.0005,
+      "max": 0.05,
+      "default": 0.002,
+      "scale": "log",
+      "description": "linear attack"
+    },
+    {
+      "name": "decay_s",
+      "unit": "s (T60)",
+      "min": 0.1,
+      "max": 4.0,
+      "default": 1.2,
+      "scale": "log",
+      "description": "time to fall 60 dB"
+    },
+    {
+      "name": "amp_db",
+      "unit": "dBFS",
+      "min": -60.0,
+      "max": 0.0,
+      "default": -9.0,
+      "scale": "lin",
+      "description": "peak level"
+    },
+    {
+      "name": "onset_s",
+      "unit": "s",
+      "min": 0.0,
+      "max": 0.25,
+      "default": 0.02,
+      "scale": "lin",
+      "description": "start time in the window"
+    }
+  ],
+  "date": "12 October 2026"
+}

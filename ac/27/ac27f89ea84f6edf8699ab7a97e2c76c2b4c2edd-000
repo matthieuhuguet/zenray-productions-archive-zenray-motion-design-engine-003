@@ -1,0 +1,36 @@
+# 12 October 2026: sine_env, a sine oscillator with an exponential pitch glide and an attack/decay envelope.
+# Phase is accumulated sample by sample (cumulative sum of f / sr), so the glide stays continuous and differentiable.
+# Derived from the mathematics (no borrowed code). FR : sinus à glissando exponentiel et enveloppe attaque/chute.
+import torch
+
+from zrmd.audio.bank import Block, db_to_amp, envelope, phase_from_freq
+
+META = {
+    "family": "oscillator",
+    "description": "Sine with an exponential pitch glide and a linear attack, exponential 60 dB decay. Blips, pops, subdrops, kicks. (12 October 2026)",
+    "tags": ["tonal", "sine", "glide", "blip", "subdrop", "kick"],
+    "sources": [{"what": "phase accumulation and exponential envelope", "url": None, "licence": "original (derived from the mathematics)"}],
+    "licence": "original",
+}
+
+
+class SineEnv(Block):
+    ID = "sine_env"
+    PARAMS = [
+        {"name": "freq_hz", "unit": "Hz", "min": 30.0, "max": 12000.0, "default": 440.0, "scale": "log", "description": "start frequency"},
+        {"name": "glide_st", "unit": "semitones", "min": -24.0, "max": 24.0, "default": 0.0, "scale": "lin", "description": "pitch reached at the end of the glide"},
+        {"name": "glide_s", "unit": "s", "min": 0.005, "max": 2.0, "default": 0.1, "scale": "log", "description": "glide time constant"},
+        {"name": "amp_db", "unit": "dBFS", "min": -60.0, "max": 0.0, "default": -12.0, "scale": "lin", "description": "peak amplitude"},
+        {"name": "onset_s", "unit": "s", "min": 0.0, "max": 0.25, "default": 0.02, "scale": "lin", "description": "start time in the window"},
+        {"name": "attack_s", "unit": "s", "min": 0.0005, "max": 0.3, "default": 0.005, "scale": "log", "description": "linear attack"},
+        {"name": "decay_s", "unit": "s (T60)", "min": 0.01, "max": 4.0, "default": 0.5, "scale": "log", "description": "time to fall 60 dB"},
+    ]
+
+    def synth(self, v, t, sr):
+        u = torch.clamp(t - v["onset_s"], min=0.0)
+        f = v["freq_hz"] * torch.pow(2.0, (v["glide_st"] / 12.0) * (1.0 - torch.exp(-u / v["glide_s"])))
+        env = envelope(t, v["onset_s"], v["attack_s"], v["decay_s"])
+        return db_to_amp(v["amp_db"]) * env * torch.sin(phase_from_freq(f * (t >= v["onset_s"]).float(), sr))
+
+
+BLOCK = SineEnv

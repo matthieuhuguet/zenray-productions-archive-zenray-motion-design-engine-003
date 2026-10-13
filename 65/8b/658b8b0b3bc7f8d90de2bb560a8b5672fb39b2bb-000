@@ -1,0 +1,97 @@
+{
+  "id": "notify_chirp",
+  "family": "notification",
+  "kind": "source",
+  "description": "Exponential chirp from a start to an end frequency over a duration, second harmonic, attack and decay. Swipe up, pop, zap, confirm. (12 October 2026)",
+  "tags": [
+    "tonal",
+    "chirp",
+    "sweep",
+    "swipe",
+    "zap",
+    "ui"
+  ],
+  "sources": [
+    {
+      "what": "exponential chirp by phase accumulation",
+      "url": null,
+      "licence": "original (derived from the published mathematics, no code copied)"
+    }
+  ],
+  "licence": "original",
+  "params": [
+    {
+      "name": "f_start_hz",
+      "unit": "Hz",
+      "min": 100.0,
+      "max": 8000.0,
+      "default": 500.0,
+      "scale": "log",
+      "description": "start frequency"
+    },
+    {
+      "name": "f_end_hz",
+      "unit": "Hz",
+      "min": 100.0,
+      "max": 12000.0,
+      "default": 2500.0,
+      "scale": "log",
+      "description": "end frequency"
+    },
+    {
+      "name": "dur_s",
+      "unit": "s",
+      "min": 0.02,
+      "max": 0.8,
+      "default": 0.18,
+      "scale": "log",
+      "description": "chirp duration"
+    },
+    {
+      "name": "h2_db",
+      "unit": "dB",
+      "min": -60.0,
+      "max": 0.0,
+      "default": -24.0,
+      "scale": "lin",
+      "description": "second harmonic level"
+    },
+    {
+      "name": "attack_s",
+      "unit": "s",
+      "min": 0.001,
+      "max": 0.1,
+      "default": 0.004,
+      "scale": "log",
+      "description": "linear attack"
+    },
+    {
+      "name": "decay_s",
+      "unit": "s (T60)",
+      "min": 0.03,
+      "max": 2.0,
+      "default": 0.3,
+      "scale": "log",
+      "description": "time to fall 60 dB"
+    },
+    {
+      "name": "amp_db",
+      "unit": "dBFS",
+      "min": -60.0,
+      "max": 0.0,
+      "default": -12.0,
+      "scale": "lin",
+      "description": "peak level"
+    },
+    {
+      "name": "onset_s",
+      "unit": "s",
+      "min": 0.0,
+      "max": 0.25,
+      "default": 0.02,
+      "scale": "lin",
+      "description": "start time in the window"
+    }
+  ],
+  "date": "12 October 2026"
+}

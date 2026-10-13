@@ -1,0 +1,87 @@
+{
+  "id": "wood_knock",
+  "family": "impact",
+  "description": "Wood knock: two decaying modes and a short click. Wood blocks, table knocks, rim clicks. (12 October 2026)",
+  "tags": [
+    "impact",
+    "wood",
+    "knock",
+    "modal",
+    "transient",
+    "foley"
+  ],
+  "sources": [
+    {
+      "what": "modal partials and filtered noise click",
+      "url": null,
+      "licence": "original (derived from the mathematics, no code copied)"
+    }
+  ],
+  "licence": "original",
+  "params": [
+    {
+      "name": "f1_hz",
+      "unit": "Hz",
+      "min": 200.0,
+      "max": 3000.0,
+      "default": 700.0,
+      "scale": "log",
+      "description": "first mode"
+    },
+    {
+      "name": "ratio",
+      "unit": "x f1",
+      "min": 1.5,
+      "max": 5.0,
+      "default": 2.7,
+      "scale": "log",
+      "description": "second mode over the first"
+    },
+    {
+      "name": "decay_s",
+      "unit": "s (T60)",
+      "min": 0.01,
+      "max": 0.4,
+      "default": 0.08,
+      "scale": "log",
+      "description": "first mode decay"
+    },
+    {
+      "name": "mode2_db",
+      "unit": "dB re mode 1",
+      "min": -30.0,
+      "max": 0.0,
+      "default": -8.0,
+      "scale": "lin",
+      "description": "second mode level"
+    },
+    {
+      "name": "click_db",
+      "unit": "dB re modes",
+      "min": -40.0,
+      "max": 0.0,
+      "default": -16.0,
+      "scale": "lin",
+      "description": "click level"
+    },
+    {
+      "name": "amp_db",
+      "unit": "dBFS",
+      "min": -60.0,
+      "max": 0.0,
+      "default": -12.0,
+      "scale": "lin",
+      "description": "peak level of the main layer"
+    },
+    {
+      "name": "onset_s",
+      "unit": "s",
+      "min": 0.0,
+      "max": 0.2,
+      "default": 0.02,
+      "scale": "lin",
+      "description": "start time in the window"
+    }
+  ],
+  "date": "12 October 2026"
+}

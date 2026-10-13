@@ -1,0 +1,152 @@
+{
+  "id": "hit_sequence",
+  "family": "foley",
+  "description": "Hit sequence: a roll of up to 16 hits with accelerating or slowing rate, crescendo, per-hit level and brightness spread and a pitched body under each click. (12 October 2026)",
+  "tags": [
+    "foley",
+    "keyboard",
+    "roll",
+    "fill",
+    "rattle",
+    "pattern",
+    "clicks",
+    "drum"
+  ],
+  "sources": [
+    {
+      "what": "deterministic stroke pattern (R1 sequence), per-hit band mask, exact delays",
+      "url": null,
+      "licence": "original (derived from the mathematics, no code copied)"
+    }
+  ],
+  "licence": "original",
+  "params": [
+    {
+      "name": "count",
+      "unit": "hits",
+      "min": 1.0,
+      "max": 16.0,
+      "default": 7.0,
+      "scale": "lin",
+      "description": "number of hits (continuous)"
+    },
+    {
+      "name": "rate_hz",
+      "unit": "hits/s",
+      "min": 3.0,
+      "max": 30.0,
+      "default": 11.7,
+      "scale": "log",
+      "description": "hit rate at the start"
+    },
+    {
+      "name": "accel",
+      "unit": "ratio",
+      "min": 0.5,
+      "max": 2.0,
+      "default": 1.0,
+      "scale": "log",
+      "description": "rate at the last hit over rate at the first"
+    },
+    {
+      "name": "jitter",
+      "unit": "x period",
+      "min": 0.0,
+      "max": 0.5,
+      "default": 0.1,
+      "scale": "lin",
+      "description": "timing deviation from the grid, fraction of the period"
+    },
+    {
+      "name": "crescendo_db",
+      "unit": "dB",
+      "min": -18.0,
+      "max": 18.0,
+      "default": 0.0,
+      "scale": "lin",
+      "description": "level of the last hit relative to the first"
+    },
+    {
+      "name": "level_spread_db",
+      "unit": "dB",
+      "min": 0.0,
+      "max": 12.0,
+      "default": 3.0,
+      "scale": "lin",
+      "description": "per-hit level variation (fixed pattern)"
+    },
+    {
+      "name": "click_hz",
+      "unit": "Hz",
+      "min": 300.0,
+      "max": 9000.0,
+      "default": 2500.0,
+      "scale": "log",
+      "description": "click band centre"
+    },
+    {
+      "name": "bw_oct",
+      "unit": "octaves",
+      "min": 0.5,
+      "max": 6.0,
+      "default": 2.0,
+      "scale": "log",
+      "description": "click band width"
+    },
+    {
+      "name": "bright_spread_oct",
+      "unit": "octaves",
+      "min": 0.0,
+      "max": 2.0,
+      "default": 0.3,
+      "scale": "lin",
+      "description": "per-hit click centre variation (fixed pattern)"
+    },
+    {
+      "name": "decay_s",
+      "unit": "s (T60)",
+      "min": 0.005,
+      "max": 0.15,
+      "default": 0.04,
+      "scale": "log",
+      "description": "decay of each hit"
+    },
+    {
+      "name": "body_hz",
+      "unit": "Hz",
+      "min": 40.0,
+      "max": 1200.0,
+      "default": 180.0,
+      "scale": "log",
+      "description": "pitch of the body under each click"
+    },
+    {
+      "name": "body_db",
+      "unit": "dB",
+      "min": -50.0,
+      "max": 6.0,
+      "default": -20.0,
+      "scale": "lin",
+      "description": "body level relative to the click"
+    },
+    {
+      "name": "amp_db",
+      "unit": "dBFS",
+      "min": -60.0,
+      "max": 0.0,
+      "default": -14.0,
+      "scale": "lin",
+      "description": "peak level of the main layer"
+    },
+    {
+      "name": "onset_s",
+      "unit": "s",
+      "min": 0.0,
+      "max": 0.2,
+      "default": 0.02,
+      "scale": "lin",
+      "description": "start time in the window"
+    }
+  ],
+  "date": "12 October 2026"
+}

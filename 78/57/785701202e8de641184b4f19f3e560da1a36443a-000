@@ -1,0 +1,31 @@
+#!/usr/bin/env python3
+# 12 October 2026 (A4): quick sanity of new bank blocks: finite render, peak level, and a nonzero gradient for every
+# parameter (loss = mean square difference to the block rendered with each parameter moved by +0.1 in unit space).
+# Usage: python -I Scripts/CheckBlockGrads.py --blocks a,b ; exit 0 when every block passes, 1 otherwise.
+# FR : contrôle rapide des nouveaux blocs : rendu fini, crête, gradient non nul pour chaque paramètre.
+import argparse, json, os, sys
+from pathlib import Path
+os.environ.setdefault("OMP_NUM_THREADS", "1")
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+import torch  # noqa: E402
+from zrmd.audio import bank, config  # noqa: E402
+
+ap = argparse.ArgumentParser(); ap.add_argument("--blocks", required=True); ap.add_argument("--sabotage", action="store_true"); a = ap.parse_args()
+sr = config.get("bank.sampleRate"); n = sr
+ok = True
+for bid in a.blocks.split(","):
+    m = bank.make(bid)
+    if a.sabotage:  # 12 October 2026 (A4): freeze the first parameter, the check must then report it dead (red)
+        next(iter(m.raw.values())).requires_grad_(False)
+    y = m(n, sr)
+    peak = float(y.detach().abs().max())
+    tgt = bank.make(bid); tgt.set_unit({p["name"]: min(0.95, m.to_unit(p["name"], p["default"]) + 0.1) for p in m.PARAMS})
+    with torch.no_grad():
+        yt = tgt(n, sr)
+    loss = ((m(n, sr) - yt) ** 2).mean()
+    loss.backward()
+    dead = [k for k, p in m.raw.items() if p.grad is None or float(p.grad.abs()) == 0.0]
+    good = bool(torch.isfinite(y).all()) and 1e-4 < peak < 1.5 and not dead
+    ok &= good
+    print(json.dumps({"block": bid, "peak": round(peak, 4), "deadGrads": dead, "ok": good}))
+sys.exit(0 if ok else 1)

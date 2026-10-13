@@ -1,0 +1,35 @@
+# 12 October 2026: impact_layered, the classic trailer hit in three layers: a low sine body with a short downward bend,
+# a band-passed noise click, and a low-passed noise tail with its own decay. Derived from the mathematics.
+# FR : impact en trois couches, corps, clic, queue.
+import torch
+
+from zrmd.audio import sfxdsp as D
+from zrmd.audio.bank import Block, db_to_amp
+
+BEND, BEND_TAU_S = 0.5, 0.03
+CLICK_HZ, CLICK_BW_OCT, CLICK_T60 = 4000.0, 2.5, 0.006
+META = D.meta("impact", "Layered impact: low body with a short bend, band-passed click, low-passed noise tail.", ["impact", "hit", "trailer", "layered", "body", "tail"], "oscillator body and filtered noise layers")
+
+
+class ImpactLayered(Block):
+    ID = "impact_layered"
+    PARAMS = [
+        D.param("body_hz", "Hz", 30, 200, 60, "log", "body pitch after the bend"),
+        D.param("body_decay_s", "s (T60)", 0.1, 3.0, 0.8, "log", "body decay"),
+        D.param("click_db", "dB re body", -40, 6, -10, "lin", "click level"),
+        D.param("tail_db", "dB re body", -40, 6, -6, "lin", "tail level"),
+        D.param("tail_cut_hz", "Hz", 150, 8000, 1200, "log", "tail low-pass cutoff"),
+        D.param("tail_decay_s", "s (T60)", 0.1, 4.0, 1.2, "log", "tail decay"),
+        D.AMP(-10.0), D.ONSET(),
+    ]
+
+    def synth(self, v, t, sr):
+        o, n = v["onset_s"], self.noise(t.shape[0], t.device)
+        u = torch.clamp(t - o, min=0.0)
+        body = D.sweep_tone(t, o, v["body_hz"] * (1.0 + BEND * torch.exp(-u / BEND_TAU_S)), sr) * D.decay(t, o, v["body_decay_s"])
+        click = D.filtered(n, lambda fr: D.band(fr, CLICK_HZ, CLICK_BW_OCT), sr) * D.decay(t, o, CLICK_T60, 0.0002)
+        tail = D.filtered(torch.roll(n, t.shape[0] // 3), lambda fr: D.lowpass(fr, v["tail_cut_hz"], 18.0), sr) * D.decay(t, o, v["tail_decay_s"], 0.002)
+        return db_to_amp(v["amp_db"]) * (body + db_to_amp(v["click_db"]) * click + db_to_amp(v["tail_db"]) * tail)
+
+
+BLOCK = ImpactLayered

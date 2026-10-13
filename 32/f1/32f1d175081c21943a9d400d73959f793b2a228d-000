@@ -1,0 +1,95 @@
+{
+  "id": "sub_drop",
+  "family": "drum",
+  "description": "Sub drop: saturated sine gliding down to a low pitch, adjustable attack and long decay. (12 October 2026)",
+  "tags": [
+    "sub",
+    "drop",
+    "boom",
+    "low",
+    "saturation"
+  ],
+  "sources": [
+    {
+      "what": "exponential glide and tanh saturation",
+      "url": null,
+      "licence": "original (derived from the mathematics, no code copied)"
+    }
+  ],
+  "licence": "original",
+  "params": [
+    {
+      "name": "start_hz",
+      "unit": "Hz",
+      "min": 40.0,
+      "max": 400.0,
+      "default": 140.0,
+      "scale": "log",
+      "description": "pitch at the start"
+    },
+    {
+      "name": "end_hz",
+      "unit": "Hz",
+      "min": 20.0,
+      "max": 80.0,
+      "default": 35.0,
+      "scale": "log",
+      "description": "pitch after the glide"
+    },
+    {
+      "name": "glide_s",
+      "unit": "s",
+      "min": 0.02,
+      "max": 0.8,
+      "default": 0.2,
+      "scale": "log",
+      "description": "time constant of the glide"
+    },
+    {
+      "name": "decay_s",
+      "unit": "s (T60)",
+      "min": 0.2,
+      "max": 4.0,
+      "default": 1.5,
+      "scale": "log",
+      "description": "time to fall 60 dB"
+    },
+    {
+      "name": "drive",
+      "unit": "x",
+      "min": 1.0,
+      "max": 8.0,
+      "default": 2.0,
+      "scale": "lin",
+      "description": "tanh saturation drive (1 is almost clean)"
+    },
+    {
+      "name": "attack_s",
+      "unit": "s",
+      "min": 0.0005,
+      "max": 0.2,
+      "default": 0.005,
+      "scale": "log",
+      "description": "linear attack"
+    },
+    {
+      "name": "amp_db",
+      "unit": "dBFS",
+      "min": -60.0,
+      "max": 0.0,
+      "default": -10.0,
+      "scale": "lin",
+      "description": "peak level of the main layer"
+    },
+    {
+      "name": "onset_s",
+      "unit": "s",
+      "min": 0.0,
+      "max": 0.2,
+      "default": 0.02,
+      "scale": "lin",
+      "description": "start time in the window"
+    }
+  ],
+  "date": "12 October 2026"
+}

@@ -1,0 +1,42 @@
+{
+  "id": "stereo_pan",
+  "family": "stereo",
+  "kind": "effect",
+  "stereo": true,
+  "description": "Constant power pan. Stereo block: mono view is the left channel, render_chain_stereo renders both. Placement of a sound in the stereo field. (12 October 2026)",
+  "tags": [
+    "effect",
+    "stereo",
+    "pan",
+    "placement"
+  ],
+  "sources": [
+    {
+      "what": "constant power pan law",
+      "url": null,
+      "licence": "original (derived from the published mathematics, no code copied)"
+    }
+  ],
+  "licence": "original",
+  "params": [
+    {
+      "name": "pan",
+      "unit": "-1..1",
+      "min": -1.0,
+      "max": 1.0,
+      "default": -0.5,
+      "scale": "lin",
+      "description": "-1 left, 0 centre, 1 right"
+    },
+    {
+      "name": "out_db",
+      "unit": "dB",
+      "min": -24.0,
+      "max": 12.0,
+      "default": 0.0,
+      "scale": "lin",
+      "description": "output gain"
+    }
+  ],
+  "date": "12 October 2026"
+}

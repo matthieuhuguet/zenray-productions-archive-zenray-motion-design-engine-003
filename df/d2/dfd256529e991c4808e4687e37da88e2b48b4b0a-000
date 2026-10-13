@@ -1,0 +1,125 @@
+{
+  "id": "noise_path",
+  "family": "whoosh",
+  "description": "Noise path: a noise band whose centre follows four breakpoints and whose width moves, under a rise and fall envelope. (12 October 2026)",
+  "tags": [
+    "whoosh",
+    "swoosh",
+    "swipe",
+    "reverse",
+    "noise",
+    "air",
+    "transition",
+    "sweep"
+  ],
+  "sources": [
+    {
+      "what": "time-varying Gaussian band mask on fixed-seed noise, breakpoint trajectories",
+      "url": null,
+      "licence": "original (derived from the mathematics, no code copied)"
+    }
+  ],
+  "licence": "original",
+  "params": [
+    {
+      "name": "c0_hz",
+      "unit": "Hz",
+      "min": 80.0,
+      "max": 16000.0,
+      "default": 600.0,
+      "scale": "log",
+      "description": "band centre at the start"
+    },
+    {
+      "name": "c1_hz",
+      "unit": "Hz",
+      "min": 80.0,
+      "max": 16000.0,
+      "default": 1500.0,
+      "scale": "log",
+      "description": "band centre at one third"
+    },
+    {
+      "name": "c2_hz",
+      "unit": "Hz",
+      "min": 80.0,
+      "max": 16000.0,
+      "default": 3000.0,
+      "scale": "log",
+      "description": "band centre at two thirds"
+    },
+    {
+      "name": "c3_hz",
+      "unit": "Hz",
+      "min": 80.0,
+      "max": 16000.0,
+      "default": 2000.0,
+      "scale": "log",
+      "description": "band centre at the end"
+    },
+    {
+      "name": "bw0_oct",
+      "unit": "octaves",
+      "min": 0.2,
+      "max": 8.0,
+      "default": 1.5,
+      "scale": "log",
+      "description": "band width at the start"
+    },
+    {
+      "name": "bw1_oct",
+      "unit": "octaves",
+      "min": 0.2,
+      "max": 8.0,
+      "default": 3.0,
+      "scale": "log",
+      "description": "band width at the end"
+    },
+    {
+      "name": "duration_s",
+      "unit": "s",
+      "min": 0.03,
+      "max": 1.0,
+      "default": 0.35,
+      "scale": "log",
+      "description": "length of the gesture"
+    },
+    {
+      "name": "peak_pos",
+      "unit": "fraction",
+      "min": 0.05,
+      "max": 0.95,
+      "default": 0.6,
+      "scale": "lin",
+      "description": "where the level peaks"
+    },
+    {
+      "name": "shape_pow",
+      "unit": "exponent",
+      "min": 0.5,
+      "max": 4.0,
+      "default": 1.5,
+      "scale": "log",
+      "description": "curvature of the rise and fall"
+    },
+    {
+      "name": "amp_db",
+      "unit": "dBFS",
+      "min": -60.0,
+      "max": 0.0,
+      "default": -14.0,
+      "scale": "lin",
+      "description": "peak level of the main layer"
+    },
+    {
+      "name": "onset_s",
+      "unit": "s",
+      "min": 0.0,
+      "max": 0.25,
+      "default": 0.02,
+      "scale": "lin",
+      "description": "start time in the window"
+    }
+  ],
+  "date": "12 October 2026"
+}

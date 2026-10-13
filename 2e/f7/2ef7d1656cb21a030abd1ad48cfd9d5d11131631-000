@@ -1,0 +1,53 @@
+# 12 October 2026 (A4): modal_pop, eight inharmonic modes f_k = f0 * k^stretch (stretch 1 harmonic, 2 a free bar,
+# below 1 a compressed membrane-like series), each with its own decay T60_k = decay_s / k^damp and a spectral tilt, the
+# whole body starting sharp and dropping by drop_st semitones with time constant drop_ms (pops, bubbles, plucked UI),
+# plus a short noise click. Modes are phase accumulated, so the pitch drop is exact. Gap measured by the A3
+# calibration: ding and pop mel error 3.1 to 3.3 JND. Parameter categories: pitch (f0_hz, stretch, drop_st, drop_ms),
+# colour (tilt_db_oct, decay_s, damp, click_db), level (amp_db, onset_s). Derived from the mathematics, no code copied.
+# FR : modes inharmoniques à décroissance par mode, chute de hauteur du corps, petit clic de bruit.
+import math
+
+import torch
+
+from zrmd.audio import sfxdsp as D
+from zrmd.audio.bank import Block, db_to_amp
+
+K = 8
+META = D.meta("modal", "Modal pop: eight inharmonic modes (stretch exponent) with per-mode decay, a body pitch drop and a noise click.",
+              ["tonal", "modal", "pop", "bubble", "ding", "drop", "inharmonic", "ui"], "phase-accumulated decaying modes f0 * k^stretch with a pitch drop")
+
+
+class ModalPop(Block):
+    ID = "modal_pop"
+    FIT = {"scanPairs": [["f0_hz", "stretch"], ["drop_st", "drop_ms"], ["decay_s", "damp"]]}
+    PARAMS = [
+        D.param("f0_hz", "Hz", 60, 5000, 700, "log", "lowest mode after the drop"),
+        D.param("stretch", "exponent", 0.5, 2.2, 1.0, "lin", "mode k sits at f0 * k^stretch"),
+        D.param("tilt_db_oct", "dB/octave", -30, 6, -12, "lin", "level of mode k relative to mode 1 per octave of k"),
+        D.param("decay_s", "s (T60)", 0.02, 3.0, 0.3, "log", "decay of the lowest mode"),
+        D.param("damp", "exponent", 0.0, 2.5, 1.0, "lin", "mode decay decay_s / k^damp"),
+        D.param("drop_st", "semitones", 0, 24, 5, "lin", "start pitch above the final pitch"),
+        D.param("drop_ms", "ms", 1, 200, 20, "log", "time constant of the pitch drop"),
+        D.param("click_db", "dB", -60, 0, -24, "lin", "level of the 3 ms noise click, relative"),
+        D.AMP(-14.0), D.ONSET(0.25, 0.02),
+    ]
+
+    def synth(self, v, t, sr):
+        dev = t.device
+        k = torch.arange(1, K + 1, device=dev, dtype=torch.float32)
+        u = torch.clamp(t - v["onset_s"], min=0.0)
+        mult = torch.pow(2.0, v["drop_st"] / 12.0 * torch.exp(-u / (v["drop_ms"] / 1000.0)))
+        ratios = torch.pow(k, v["stretch"])
+        f_end = v["f0_hz"] * ratios
+        gains = torch.pow(10.0, v["tilt_db_oct"] * torch.log2(k) / 20.0)
+        gains = torch.where(k == 1, torch.ones_like(k), gains)
+        env = D.decay(t[None, :], v["onset_s"], (v["decay_s"] / torch.pow(k, v["damp"]))[:, None], 0.0005)
+        # Each mode keeps its ratio to mode 1 during the drop; phases accumulated per mode and wrapped (float32 safe).
+        f = (f_end[None, :] * (mult * D.gate(t, v["onset_s"]))[:, None])  # [n, K]
+        ph = D.phase_from_freq(f, sr).T
+        y = (gains[:, None] * env * (f.T < 0.45 * sr).float() * torch.sin(ph)).sum(0) / torch.sqrt((gains * gains).sum() + 1e-12)
+        click = D.decay(t, v["onset_s"], 0.003, 0.0002) * self.noise(t.shape[0], dev)
+        return db_to_amp(v["amp_db"]) * (y + db_to_amp(v["click_db"]) * click)
+
+
+BLOCK = ModalPop

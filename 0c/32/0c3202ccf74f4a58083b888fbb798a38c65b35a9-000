@@ -1,0 +1,157 @@
+#!/usr/bin/env python3
+# 12 October 2026: task MI-vocals, one iteration of the procedural vocals stem (zrmd/audio/stems/vocals.py).
+#   IterateVocals.py [--base V_034] [--set '{"model": {...}, "render": {...}}'] [--note TEXT]
+#   IterateVocals.py --selftest
+# Fits the formant pad tables on the reference vocals stem (target only), renders the stem from the tables, the score
+# and our own drums, bass and other of the base version, and writes a new version
+# sound/onekey-pro-2/music-bench/stem-iter/vocals/V_NNN (never overwritten) with vocals.wav (stereo, side channel by
+# resynth.apply_stereo with the base version's measured widths), params.json (settings and fitted tables) and
+# scores.json (MusicCritic's own tfBands and diagnosis, plus the bar losses of resynth, beside the base version).
+# --selftest proves the new blocks both ways (exit 0 only when every check holds):
+#   comb renderer: rendering a model power reproduces it (green, >= 99.9 against its own target), and the same render
+#   with the 120 to 6000 Hz groups raised by 6 dB drops by at least 3 points (red);
+#   fitter: a synthetic target built from the components with known gains is recovered (green, >= 99.5), and the same
+#   target fitted without the component that carries it scores at least 3 points lower (red).
+# FR : une iteration de la piste vocals procedurale ; tables ajustees, rendu, version V_NNN, scores ; --selftest.
+import os
+
+for _k in ("OMP_NUM_THREADS", "VECLIB_MAXIMUM_THREADS", "OPENBLAS_NUM_THREADS", "MKL_NUM_THREADS"):
+    os.environ.setdefault(_k, "4")
+import argparse
+import json
+import sys
+import time
+from pathlib import Path
+
+import numpy as np
+
+ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(ROOT))
+sys.path.insert(0, str(ROOT / "Scripts"))
+from zrmd.audio import resynth as RS  # noqa: E402
+from zrmd.audio.stems import vocals as V  # noqa: E402
+import MusicCritic as MC  # noqa: E402
+
+STEM = "vocals"
+OUT = Path("/Users/zenray/.claude/tmp/tmp-zenray-motion-design/sound/onekey-pro-2/music-bench/stem-iter/vocals")
+
+
+def load(base: str):
+    P = RS.params()
+    sr = P["sampleRate"]
+    ref = RS.load_reference(P)
+    bdir = Path(P["paths"]["bench"]) / base
+    ours = {k: RS.mono(RS._read(bdir / "stems" / f"{k}.wav", sr)) for k in ("drums", "bass", "other", "vocals")}
+    score = json.loads(Path(P["paths"]["score"]).read_text())
+    bprm = json.loads((bdir / "params.json").read_text())
+    return P, sr, RS.mono(ref["stems"][STEM]), ours, score, bprm, bdir
+
+
+def next_version() -> Path:
+    OUT.mkdir(parents=True, exist_ok=True)
+    k = 1 + max([int(p.name[2:]) for p in OUT.glob("V_[0-9][0-9][0-9]")] or [0])
+    return OUT / f"V_{k:03d}"
+
+
+def bar_scores(ref: np.ndarray, ours: np.ndarray, score: dict, sr: int, P: dict) -> dict:
+    n = len(ref)
+    y = ours[:n] if len(ours) >= n else np.pad(ours, (0, n - len(ours)))
+    pb = RS.ploss_bars(ref, y, score, sr, P)
+    st = RS._stable_job((STEM, ref, y, score, sr, P))[1]
+    return {"plossBarMedian": pb["median"], "plossBarMean": pb["mean"], "plossBarNoOnset": st["plossBarNoOnset"], "tfBandsPublished": st["tfBands"]}
+
+
+def critic(ref: np.ndarray, ours: np.ndarray, score: dict, sr: int) -> dict:
+    cmp = MC.compare(ref, ours, sr)
+    times = np.arange(cmp["d"].shape[1]) * MC.CFG["hop"] / sr
+    return MC.diagnose(cmp, times, [{"start": s["start"], "end": s["end"]} for s in score["sections"]], [])
+
+
+def run(base: str, over: dict, note: str) -> dict:
+    t0 = time.time()
+    C = V.cfg(over)
+    P, sr, ref, ours, score, bprm, bdir = load(base)
+    n = len(ref)
+    G = C["grid"]
+    _, W = V.bands(sr, G)
+    rpw = V.band_power(ref, sr, G, W)
+    fr = rpw.shape[1]
+    names, comps, t = V.components(score, ours, sr, fr, C)
+    sp = V.spans(score, C["model"]["spanKind"])
+    idx = V.span_index(t, sp)
+    gdb, alpha = V.fit(rpw, comps, idx, len(sp), C)
+    model = {"names": names, "spans": [[round(a, 4), round(min(b, 1e9), 4)] for a, b in sp],
+             "gainsDb": np.round(gdb, 3).tolist(), "alpha": np.round(alpha, 4).tolist()}
+    y, Ph = V.render(model, score, ours, n, sr, C)
+    model_score = V.tf_score(rpw, Ph, G)[0]
+    st = (bprm.get("stemFx", {}).get(STEM, {}) or {}).get("stereo")
+    stereo = RS.apply_stereo(y, st, sr, P)
+    d = next_version()
+    d.mkdir(parents=True)
+    RS.write_stereo(d / f"{STEM}.wav", stereo, sr)
+    mono = RS.mono(stereo)
+    diag = critic(ref, mono, score, sr)
+    bars = bar_scores(ref, mono, score, sr, P)
+    base_h = json.loads((bdir / "scores.json").read_text())["headline"][STEM]
+    scores = {"date": "12 October 2026", "version": d.name, "stem": STEM, "base": base,
+              "tfBands": diag["score"], "modelTfBands": round(model_score, 3), **bars,
+              "baseline": {"tfBands": base_h["tfBands"], "plossBarMedian": base_h["plossBarMedian"], "plossBarNoOnset": base_h["plossBarNoOnset"]},
+              "diagnosis": diag, "seconds": round(time.time() - t0, 1)}
+    params = {"date": "12 October 2026", "private": True, "stem": STEM, "base": base, "note": note, "settings": C,
+              "doc": "Procedural vocals: formant pad over procedural components (score envelopes, our own stems); the "
+                     "reference stem is the fitting target only.", "model": model}
+    (d / "params.json").write_text(json.dumps(params) + "\n")
+    (d / "scores.json").write_text(json.dumps(scores, indent=1) + "\n")
+    print(json.dumps({k: scores[k] for k in ("version", "tfBands", "modelTfBands", "plossBarMedian", "plossBarNoOnset", "baseline", "seconds")}))
+    print(json.dumps({"groups": diag["groups"], "split": diag["split"]}))
+    return scores
+
+
+def selftest() -> bool:
+    P, sr, ref, ours, score, bprm, _ = load("V_034")
+    C = V.cfg({"model": {"iters": 400, "tailS": 0.0}})  # no tail: a tail of "other" would carry the red case
+    G = C["grid"]
+    _, W = V.bands(sr, G)
+    n = len(ref)
+    fr = n // G["hop"] + 1
+    names, comps, t = V.components(score, ours, sr, fr, C)
+    sp = V.spans(score, "section")
+    idx = V.span_index(t, sp)
+    rng = np.random.default_rng(3)
+    lvl = 10 * np.log10(V.band_power(ref, sr, G, W).mean(axis=1) + 1e-30)
+    gtrue = np.stack([np.tile(lvl - 8 + rng.normal(0, 3, len(lvl)), (len(sp), 1)) for _ in comps])
+    Ph = V.model_power(gtrue, np.zeros((len(comps), len(lvl))), comps, idx)
+    y = V.render_comb(Ph, n, sr, C)
+    green_comb = V.tf_score(Ph, V.band_power(y, sr, G, W), G)[0]
+    c = V.bands(sr, G)[0]
+    Ph_bad = Ph * np.where((c >= 120) & (c < 6000), 10 ** 0.6, 1.0)[:, None]
+    red_comb = V.tf_score(Ph, V.band_power(V.render_comb(Ph_bad, n, sr, C), sr, G, W), G)[0]
+    g, a = V.fit(Ph, comps, idx, len(sp), C)
+    green_fit = V.tf_score(Ph, V.model_power(g, a, comps, idx), G)[0]
+    j = names.index("other")
+    keep = [k for k in range(len(comps)) if k != j]
+    Ph_other = V.model_power(gtrue[[j]] + 18.0, np.zeros((1, len(lvl))), [comps[j]], idx) + Ph
+    g2, a2 = V.fit(Ph_other, [comps[k] for k in keep], idx, len(sp), C)
+    red_fit = V.tf_score(Ph_other, V.model_power(g2, a2, [comps[k] for k in keep], idx), G)[0]
+    g3, a3 = V.fit(Ph_other, comps, idx, len(sp), C)
+    green_fit2 = V.tf_score(Ph_other, V.model_power(g3, a3, comps, idx), G)[0]
+    ok = green_comb >= 99.9 and green_comb - red_comb >= 3 and green_fit >= 99.5 and green_fit2 - red_fit >= 3
+    print(json.dumps({"date": "12 October 2026", "combGreen": round(green_comb, 3), "combRedPlus6dB120to6000": round(red_comb, 3),
+                      "fitGreen": round(green_fit, 3), "fitGreenWithOther": round(green_fit2, 3), "fitRedWithoutOther": round(red_fit, 3), "pass": ok}))
+    return ok
+
+
+def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--base", default="V_034")
+    ap.add_argument("--set", default="{}")
+    ap.add_argument("--note", default="")
+    ap.add_argument("--selftest", action="store_true")
+    a = ap.parse_args()
+    if a.selftest:
+        sys.exit(0 if selftest() else 1)
+    run(a.base, json.loads(a.set), a.note)
+
+
+if __name__ == "__main__":
+    main()

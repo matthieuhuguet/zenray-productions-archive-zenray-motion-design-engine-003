@@ -1,0 +1,394 @@
+#!/usr/bin/env python3
+# 12 October 2026: task MI-drums, iterate the drums stem of the music bench toward 99 on the M3 critic (tfBands).
+# A version is a chain of operations replayed on our own rendered stem (bench V_034 by default), never on reference
+# audio: "blocks" adds fitted KickBody/Tom blocks per hit, "tables" applies per-class gain tables (STFT mask).
+#   IterateDrums.py body   [--from V_NNN] [--kinds kick,tom] [--seed S]      fit one block per kick/tom hit
+#   IterateDrums.py tables [--from V_NNN] [--classes hatClosed,hatOpen,snare,clap]   per-class tables
+#   IterateDrums.py render --params FILE                                      replay a params.json, print scores
+#   IterateDrums.py selftest                                                  prove the block fitter and tables both ways
+# Output: sound/onekey-pro-2/music-bench/stem-iter/drums/V_NNN/{drums.wav, params.json, scores.json} (never overwritten).
+# FR : iteration de la piste batterie ; chaque version rejoue une chaine d'operations sur notre propre rendu.
+import os
+
+for _k in ("OMP_NUM_THREADS", "VECLIB_MAXIMUM_THREADS", "OPENBLAS_NUM_THREADS", "MKL_NUM_THREADS"):
+    os.environ.setdefault(_k, "1")
+import argparse
+import copy
+import json
+import sys
+import time
+from pathlib import Path
+
+import numpy as np
+
+ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(ROOT))
+sys.path.insert(0, str(ROOT / "Scripts"))
+from zrmd.audio import resynth as RS  # noqa: E402
+from zrmd.audio.stems import drums as D  # noqa: E402
+import MusicCritic as MC  # noqa: E402
+
+# 12 October 2026: script settings (interface). FR : reglages du script.
+SET = {"baseVersion": "V_034", "stem": "drums", "outDir": "stem-iter/drums",
+       "tableClasses": ["hatClosed", "hatOpen", "snare", "clap"], "bodyKinds": ["kick", "tom"]}
+
+
+def ctx():
+    P = RS.params()
+    sr = P["sampleRate"]
+    bench = Path(P["paths"]["bench"])
+    ref = RS.mono(RS._read(Path(P["paths"]["stems"]) / "drums.wav", sr)).astype(np.float64)
+    score = json.loads((bench / SET["baseVersion"] / "score.json").read_text())
+    return P, sr, bench, ref, score
+
+
+def base_stem(bench, sr):
+    return RS._read(bench / SET["baseVersion"] / "stems" / "drums.wav", sr).astype(np.float64)
+
+
+def add_blocks(x, blocks, sr):
+    for b in blocks:
+        y = D.BLOCKS[b["kind"]](b["v"], sr, b["seed"])
+        a = int(round((b["t"] + b["v"]["dtMs"] * 1e-3) * sr))
+        i0, i1 = max(0, a), min(len(x), a + len(y))
+        if i1 > i0:
+            x[i0:i1] += y[i0 - a: i1 - a][:, None] if x.ndim == 2 else y[i0 - a: i1 - a]
+    return x
+
+
+def render(params, sr, bench, score):
+    """Replay the chain of operations on our base stem. FR : rejoue la chaine d'operations."""
+    x = base_stem(bench, sr)
+    for op in params["ops"]:
+        if op["op"] == "blocks":
+            x = add_blocks(x, op["blocks"], sr)
+        elif op["op"] == "bed":
+            D.CFG["bed"]["tonalHz"] = op.get("fit", {}).get("tonalHz", 0.0)
+            D.CFG["bed"]["maxHz"] = op.get("fit", {}).get("maxHz", 16000.0)
+            y = D.bed(np.array(op["tableDb"]), np.array(op["edgesS"]), np.array(op["centresHz"]), len(x), sr, op["seed"])
+            x = x + y[:, None]
+        elif op["op"] == "segeq":
+            x = D.apply_segeq(x, np.array(op["tableDb"]), np.array(op["edgesS"]), np.array(op["centresHz"]), sr)
+        elif op["op"] == "tables":
+            D.CFG["tables"]["nodesS"] = op["nodesS"]
+            x = D.apply_tables(x, {k: np.array(v) for k, v in op["tables"].items()}, score["drums"], sr, np.array(op["centresHz"]))
+        else:
+            raise SystemExit(f"unknown op {op['op']}")
+    return x
+
+
+def scores(ref, ours_st, sr, score, P):
+    o = RS.mono(ours_st)
+    cmp = MC.compare(ref, o, sr)
+    times = np.arange(cmp["d"].shape[1]) * MC.CFG["hop"] / sr
+    diag = MC.diagnose(cmp, times, [{"start": s["start"], "end": s["end"]} for s in score["sections"]], RS.stem_events(score, "drums"))
+    _, st = RS._stable_job(("drums", ref.astype(np.float32), o[: len(ref)].astype(np.float32), score, sr, P))
+    return {"date": "12 October 2026", "tfBands": round(cmp["score"], 3), "plossBarNoOnset": st["plossBarNoOnset"],
+            "plossEvents": st["plossEvents"], "tfBandsStable": st["tfBands"], "diagnosis": diag}
+
+
+def next_dir(bench):
+    d = bench / SET["outDir"]
+    d.mkdir(parents=True, exist_ok=True)
+    i = 1
+    while True:
+        p = d / f"V_{i:03d}"
+        try:
+            p.mkdir()
+            return p
+        except FileExistsError:
+            i += 1
+
+
+def parent_params(bench, name):
+    if not name:
+        return {"format": "zrmd.drums.stemiter", "base": SET["baseVersion"], "ops": []}
+    return json.loads((bench / SET["outDir"] / name / "params.json").read_text())
+
+
+def save(bench, params, x, sr, sc, note):
+    d = next_dir(bench)
+    RS.write_stereo(d / "drums.wav", x.astype(np.float32), sr)
+    params = dict(params, date="12 October 2026", version=d.name, note=note, private=True)
+    (d / "params.json").write_text(json.dumps(params, indent=1) + "\n")
+    (d / "scores.json").write_text(json.dumps(dict(sc, version=d.name), indent=1) + "\n")
+    print(json.dumps({"version": d.name, "tfBands": sc["tfBands"], "plossBarNoOnset": sc["plossBarNoOnset"],
+                      "plossEvents": sc["plossEvents"], "groups": sc["diagnosis"]["groups"], "split": sc["diagnosis"]["split"]}, indent=1))
+    return d
+
+
+def cmd_body(a):
+    P, sr, bench, ref, score = ctx()
+    pp = parent_params(bench, a.parent)
+    x = render(pp, sr, bench, score)
+    om = RS.mono(x).copy()
+    g = D.Grid(ref, om, sr)
+    print(f"start E {g.E():.4f} score {g.score():.3f}", flush=True)
+    kinds = a.kinds.split(",")
+    hits = [h for h in score["drums"] if h["class"] in kinds]
+    blocks = []
+    t0 = time.time()
+    for i, h in enumerate(sorted(hits, key=lambda q: q["t"])):
+        kind = "kick" if h["class"] == "kick" else "tom"  # 12 October 2026: snare and clap bodies use the two-mode tom block
+        seed = a.seed + i
+        val, v = D.fit_hit(g, kind, h["t"], sr, seed, D.default_start(kind, h))
+        if v is None:
+            continue
+        y = D.BLOCKS[kind](v, sr, seed)
+        at = int(round((h["t"] + v["dtMs"] * 1e-3) * sr))
+        g.commit(y, at, om)
+        blocks.append({"kind": kind, "t": h["t"], "seed": seed, "v": {k: round(float(q), 5) for k, q in v.items()}})
+        if i % 10 == 0:
+            print(f"  hit {i}/{len(hits)} t={h['t']:.2f} {kind} E {g.E():.4f} score {g.score():.3f} kept {len(blocks)} ({time.time() - t0:.0f} s)", flush=True)
+    params = copy.deepcopy(pp)
+    params["ops"].append({"op": "blocks", "blocks": blocks, "fit": {"classes": kinds, "cma": D.CFG["cma"], "ranges": {k: D.CFG[k] for k in ("kick", "tom")}}})
+    x = add_blocks(x, blocks, sr)
+    save(bench, params, x, sr, scores(ref, x, sr, score, P), f"body blocks {kinds} on {a.parent or SET['baseVersion']}")
+
+
+def cmd_gaps(a):
+    """12 October 2026: blocks at the strongest deficits away from transcribed hits; each candidate time tries every
+    block kind (CMA-ES from 0.5 cube centre, frame start minus half a hop) and keeps the best, if the global E drops.
+    FR : blocs aux plus forts manques loin des coups connus ; chaque instant essaie chaque type de bloc."""
+    P, sr, bench, ref, score = ctx()
+    pp = parent_params(bench, a.parent)
+    x = render(pp, sr, bench, score)
+    om = RS.mono(x).copy()
+    g = D.Grid(ref, om, sr)
+    print(f"start score {g.score():.3f}", flush=True)
+    ts = D.gap_times(g, [h["t"] for h in score["drums"]], top=a.top)
+    blocks = []
+    for i, t in enumerate(ts):
+        t0 = max(0.0, t - 0.5 * g.h / sr)
+        best = (g.E(), None, None)
+        for kind in a.kinds.split(","):
+            seed = a.seed + 10 * i
+            val, v = D.fit_hit(g, kind, t0, sr, seed, np.full(len(D.CFG[kind]), 0.5))
+            if v is not None and val < best[0]:
+                best = (val, kind, v)
+        if best[1] is None:
+            continue
+        kind, v = best[1], best[2]
+        y = D.BLOCKS[kind](v, sr, seed)
+        g.commit(y, int(round((t0 + v["dtMs"] * 1e-3) * sr)), om)
+        blocks.append({"kind": kind, "t": round(t0, 5), "seed": seed, "v": {k: round(float(q), 5) for k, q in v.items()}})
+        print(f"  gap {i}/{len(ts)} t={t0:.2f} {kind} score {g.score():.3f}", flush=True)
+    params = copy.deepcopy(pp)
+    params["ops"].append({"op": "blocks", "blocks": blocks, "fit": {"gaps": len(ts), "kinds": a.kinds, "cma": D.CFG["cma"]}})
+    x = add_blocks(x, blocks, sr)
+    save(bench, params, x, sr, scores(ref, x, sr, score, P), f"gap blocks {a.kinds} on {a.parent}")
+
+
+def cmd_tables(a):
+    P, sr, bench, ref, score = ctx()
+    pp = parent_params(bench, a.parent)
+    x0 = render(pp, sr, bench, score)
+    classes = a.classes.split(",")
+    if a.nodes:
+        D.CFG["tables"]["nodesS"] = [float(q) for q in a.nodes.split(",")]
+    nodes = D.CFG["tables"]["nodesS"]
+    g = D.Grid(ref, RS.mono(x0), sr)
+    tabs = {k: np.zeros((len(g.c), len(nodes))) for k in classes}
+    best = (g.E(), {k: v.copy() for k, v in tabs.items()}, x0)
+    print(f"start score {g.score():.3f}", flush=True)
+    for it in range(a.iters):
+        R = D.table_residual(g, score["drums"], classes)
+        for k in classes:
+            tabs[k] = np.clip(tabs[k] + D.CFG["tables"]["step"] * R[k], -D.CFG["tables"]["maxDb"], D.CFG["tables"]["maxDb"])
+        x = D.apply_tables(x0, tabs, score["drums"], sr, g.c)
+        g.set_ours(RS.mono(x))
+        print(f"  iter {it} score {g.score():.3f}", flush=True)
+        if g.E() < best[0]:
+            best = (g.E(), {k: v.copy() for k, v in tabs.items()}, x)
+    params = copy.deepcopy(pp)
+    params["ops"].append({"op": "tables", "classes": classes, "nodesS": nodes, "centresHz": [round(float(c), 3) for c in g.c],
+                          "tables": {k: np.round(v, 2).tolist() for k, v in best[1].items()}, "fit": dict(D.CFG["tables"], iters=a.iters)})
+    x = best[2]
+    save(bench, params, x, sr, scores(ref, x, sr, score, P), f"class tables {classes} on {a.parent or SET['baseVersion']}")
+
+
+def seg_edges(score, kind, n, sr):
+    # Segment edges of the bed: "bars", "beats" or "beats/K" (K equal parts per beat). FR : bornes des segments.
+    end = score["tempo"]["bars"][-1]["end"]
+    if kind == "bars":
+        ev = [b["start"] for b in score["tempo"]["bars"]] + [end]
+    else:
+        bt = [b["t"] for b in score["tempo"]["beats"]] + [end]
+        k = int(kind.split("/")[1]) if "/" in kind else 1
+        ev = [float(q) for a0, b0 in zip(bt[:-1], bt[1:]) for q in np.linspace(a0, b0, k + 1)[:-1]] + [end]
+    return np.unique(np.array([0.0] + [e for e in ev if e > 0.01] + [n / sr]))
+
+
+def cmd_bed(a):
+    P, sr, bench, ref, score = ctx()
+    pp = parent_params(bench, a.parent)
+    x = render(pp, sr, bench, score)
+    edges = seg_edges(score, a.segment, len(x), sr)
+    if a.max_hz:
+        D.CFG["bed"]["maxHz"] = a.max_hz
+    D.CFG["bed"]["tonalHz"] = a.tonal_hz
+    T, y, E = D.fit_bed(ref, RS.mono(x).copy(), sr, edges)
+    g = D.Grid(ref, RS.mono(x), sr)
+    params = copy.deepcopy(pp)
+    params["ops"].append({"op": "bed", "segment": a.segment, "seed": D.CFG["bed"]["seed"], "edgesS": [round(float(e), 5) for e in edges],
+                          "centresHz": [round(float(c), 4) for c in g.c], "tableDb": np.round(T, 2).tolist(), "fit": dict(D.CFG["bed"])})
+    x = render(params, sr, bench, score)
+    save(bench, params, x, sr, scores(ref, x, sr, score, P), f"low bed ({a.segment}) on {a.parent or SET['baseVersion']}")
+
+
+def cmd_segeq(a):
+    P, sr, bench, ref, score = ctx()
+    pp = parent_params(bench, a.parent)
+    x = render(pp, sr, bench, score)
+    edges = seg_edges(score, a.segment, len(x), sr)
+    if a.min_db is not None:
+        D.CFG["segeq"]["minDb"] = a.min_db
+    T, y, E = D.fit_segeq(ref, x, sr, edges)
+    g = D.Grid(ref, RS.mono(x), sr)
+    params = copy.deepcopy(pp)
+    params["ops"].append({"op": "segeq", "segment": a.segment, "edgesS": [round(float(e), 5) for e in edges],
+                          "centresHz": [round(float(c), 4) for c in g.c], "tableDb": np.round(T, 2).tolist(), "fit": dict(D.CFG["segeq"])})
+    x = render(params, sr, bench, score)
+    save(bench, params, x, sr, scores(ref, x, sr, score, P), f"segment EQ ({a.segment}) on {a.parent}")
+
+
+def cmd_render(a):
+    P, sr, bench, ref, score = ctx()
+    params = json.loads(Path(a.params).read_text())
+    x = render(params, sr, bench, score)
+    sc = scores(ref, x, sr, score, P)
+    print(json.dumps({k: sc[k] for k in ("tfBands", "plossBarNoOnset", "plossEvents")}))
+
+
+def cmd_selftest(a):
+    """Both ways. Block: a known kick body added to silence is recovered by the fitter (green, local score >= 99),
+    and the same target fitted with the tom block restricted to f >= 200 Hz stays low (red).
+    Tables: a known +6 dB tilt on hats of our stem is recovered (green, score back above 99.5) and a table fitted
+    on the wrong class cannot recover it (red). FR : preuve dans les deux sens du bloc et des tables."""
+    P, sr, bench, ref, score = ctx()
+    res = {}
+    # Block test on a 1.5 s window. FR : test du bloc sur une fenetre de 1,5 s.
+    n = int(1.5 * sr)
+    truth = {"f1Hz": 52.0, "ratio": 3.2, "tauMs": 28.0, "ampDb": -14.0, "t60Ms": 420.0, "clickDb": -34.0, "clickMs": 4.0,
+             "clickHz": 3500.0, "dtMs": 0.0}
+    tgt = np.zeros(n)
+    y = D.kick_body(truth, sr, 5)
+    a0 = int(0.3 * sr)
+    tgt[a0:a0 + len(y)] += y[: n - a0]
+    tgt += 1e-4 * np.random.default_rng(0).standard_normal(n)
+    g = D.Grid(tgt, 1e-4 * np.random.default_rng(1).standard_normal(n), sr)
+    s0 = g.score()
+    val, v = D.fit_hit(g, "kick", 0.3, sr, 5, D.default_start("kick", {"pitchHz": 60.0, "levelDb": -20.0}))
+    green = g.score(val)
+    saved = copy.deepcopy(D.CFG["tom"])
+    D.CFG["tom"]["f1Hz"] = [200.0, 420.0]
+    g2 = D.Grid(tgt, 1e-4 * np.random.default_rng(1).standard_normal(n), sr)
+    val2, _ = D.fit_hit(g2, "tom", 0.3, sr, 5, None)
+    D.CFG["tom"] = saved
+    red = g2.score(val2)
+    res["block"] = {"before": round(s0, 3), "greenKickFit": round(green, 3), "redTomAbove200Hz": round(red, 3),
+                    "fitted": {k: round(q, 3) for k, q in (v or {}).items()}, "pass": green >= 99.0 and green - red >= 5.0}
+    # Table test on our own stem: target = our stem with a known table on hats. FR : test des tables.
+    x = base_stem(bench, sr)
+    g = D.Grid(RS.mono(x), RS.mono(x), sr)
+    nodes = D.CFG["tables"]["nodesS"]
+    known = {"hatClosed": np.tile(np.linspace(-14, 10, len(g.c))[:, None], (1, len(nodes)))}  # 12 October 2026: strong enough to drop the score clearly
+    tgt = RS.mono(D.apply_tables(x, known, score["drums"], sr, g.c))
+    out = {}
+    for cls in ("hatClosed", "kick"):
+        gg = D.Grid(tgt, RS.mono(x), sr)
+        tabs = {cls: np.zeros((len(g.c), len(nodes)))}
+        for _ in range(4):
+            R = D.table_residual(gg, score["drums"], [cls])
+            tabs[cls] = tabs[cls] + D.CFG["tables"]["step"] * R[cls]
+            gg.set_ours(RS.mono(D.apply_tables(x, tabs, score["drums"], sr, g.c)))
+        out[cls] = round(gg.score(), 3)
+    g0 = D.Grid(tgt, RS.mono(x), sr)
+    res["tables"] = {"before": round(g0.score(), 3), "greenRightClass": out["hatClosed"], "redWrongClass": out["kick"],
+                     "pass": (out["hatClosed"] - g0.score()) >= 0.9 * (100 - g0.score()) and (out["kick"] - g0.score()) < 0.5 * (100 - g0.score())}  # 12 October 2026: green recovers 90 percent of the gap, red less than half
+    # 12 October 2026: burst block, both ways. FR : rafale, dans les deux sens.
+    tb = {"centreHz": 4200.0, "octaves": 1.5, "ampDb": -22.0, "t60Ms": 120.0, "dtMs": 0.0}
+    tgt = np.zeros(n)
+    yb = D.burst(tb, sr, 9)
+    tgt[a0:a0 + len(yb)] += yb
+    tgt += 1e-4 * np.random.default_rng(0).standard_normal(n)
+    gb = D.Grid(tgt, 1e-4 * np.random.default_rng(1).standard_normal(n), sr)
+    vb, _ = D.fit_hit(gb, "burst", 0.3, sr, 21, np.full(len(D.CFG["burst"]), 0.5))
+    gk = D.Grid(tgt, 1e-4 * np.random.default_rng(1).standard_normal(n), sr)
+    keepc = D.CFG["kick"]["clickDb"]
+    D.CFG["kick"]["clickDb"] = [-80.0, -79.9]  # red: the kick body alone, its click layer switched off
+    vk, _ = D.fit_hit(gk, "kick", 0.3, sr, 21, None)
+    D.CFG["kick"]["clickDb"] = keepc
+    res["burst"] = {"greenBurstFit": round(gb.score(vb), 3), "redKickOnBurst": round(gk.score(vk), 3)}
+    res["burst"]["pass"] = res["burst"]["greenBurstFit"] >= 97.0 and res["burst"]["greenBurstFit"] - res["burst"]["redKickOnBurst"] >= 10.0
+    # 12 October 2026: segment EQ, both ways, on our own stem with a known table of cuts. FR : egaliseur par segment.
+    edges = seg_edges(score, "beats/2", len(x), sr)
+    S = len(edges) - 1
+    Tk = np.zeros((len(g.c), S))
+    Tk[(g.c >= 120) & (g.c < 500), ::2] = -10.0
+    tgt = RS.mono(D.apply_segeq(x, Tk, edges, g.c, sr))
+    g0 = D.Grid(tgt, RS.mono(x), sr)
+    _, _, Eg = D.fit_segeq(tgt, x, sr, edges, log=lambda *_: None)
+    keep = D.CFG["segeq"]["minDb"]
+    D.CFG["segeq"]["minDb"] = 0.0
+    _, _, Er = D.fit_segeq(tgt, x, sr, edges, log=lambda *_: None)
+    D.CFG["segeq"]["minDb"] = keep
+    b0, gs, rs = g0.score(), g0.score(Eg), g0.score(Er)
+    res["segeq"] = {"before": round(b0, 3), "greenFit": round(gs, 3), "redNoCuts": round(rs, 3),
+                    "pass": gs - b0 >= 0.8 * (100 - b0) and rs - b0 < 0.5 * (100 - b0)}
+    # 12 October 2026: bed, both ways: a known bed (seed 3) on our stem is refitted with another seed (green), and a bed
+    # limited to 120 Hz cannot rebuild a broadband one (red). FR : nappe, dans les deux sens.
+    Tb = np.full((len(g.c), S), -140.0)
+    Tb[g.c < 2000] = 20.0
+    keepseed = D.CFG["bed"]["seed"]
+    D.CFG["bed"]["seed"] = 3
+    tgt = RS.mono(x) + D.bed(Tb - 0.0, edges, g.c, len(x), sr, 3)
+    D.CFG["bed"]["seed"] = keepseed
+    g0 = D.Grid(tgt, RS.mono(x), sr)
+    _, _, Eg = D.fit_bed(tgt, RS.mono(x).copy(), sr, edges, log=lambda *_: None)
+    D.CFG["bed"]["maxHz"] = 120.0
+    _, _, Er = D.fit_bed(tgt, RS.mono(x).copy(), sr, edges, log=lambda *_: None)
+    D.CFG["bed"]["maxHz"] = 16000.0
+    b0, gs, rs = g0.score(), g0.score(Eg), g0.score(Er)
+    res["bed"] = {"before": round(b0, 3), "greenOtherSeed": round(gs, 3), "redMax120Hz": round(rs, 3),
+                  "pass": gs - b0 >= 0.6 * (100 - b0) and rs - b0 < 0.5 * (gs - b0)}
+    res["pass"] = all(res[k]["pass"] for k in ("block", "tables", "burst", "segeq", "bed"))
+    print(json.dumps(res, indent=1))
+    sys.exit(0 if res["pass"] else 1)
+
+
+def main():
+    ap = argparse.ArgumentParser()
+    sub = ap.add_subparsers(dest="cmd", required=True)
+    b = sub.add_parser("body")
+    b.add_argument("--from", dest="parent")
+    b.add_argument("--kinds", default=",".join(SET["bodyKinds"]))
+    b.add_argument("--seed", type=int, default=0)
+    gp = sub.add_parser("gaps")
+    gp.add_argument("--from", dest="parent", required=True)
+    gp.add_argument("--kinds", default="kick,tom,burst")
+    gp.add_argument("--top", type=int, default=60)
+    gp.add_argument("--seed", type=int, default=5000)
+    t = sub.add_parser("tables")
+    t.add_argument("--from", dest="parent")
+    t.add_argument("--classes", default=",".join(SET["tableClasses"]))
+    t.add_argument("--iters", type=int, default=D.CFG["tables"]["iters"])
+    t.add_argument("--nodes")
+    e = sub.add_parser("bed")
+    e.add_argument("--from", dest="parent")
+    e.add_argument("--segment", default="beats")
+    e.add_argument("--max-hz", type=float)
+    e.add_argument("--tonal-hz", type=float, default=0.0)
+    q = sub.add_parser("segeq")
+    q.add_argument("--from", dest="parent", required=True)
+    q.add_argument("--segment", default="beats/2")
+    q.add_argument("--min-db", type=float)
+    r = sub.add_parser("render")
+    r.add_argument("--params", required=True)
+    sub.add_parser("selftest")
+    a = ap.parse_args()
+    {"body": cmd_body, "gaps": cmd_gaps, "bed": cmd_bed, "segeq": cmd_segeq, "tables": cmd_tables, "render": cmd_render, "selftest": cmd_selftest}[a.cmd](a)
+
+
+if __name__ == "__main__":
+    main()

@@ -1,0 +1,35 @@
+# 12 October 2026: ui_tick, two short sine pings (tick then tock) separated by gap_s, the second at ratio2 times the
+# pitch and second_db quieter: notifications, steppers, toggles. Derived from the mathematics. FR : tic-tac d'interface.
+import math
+
+import torch
+
+from zrmd.audio import sfxdsp as D
+from zrmd.audio.bank import Block, db_to_amp
+
+ATTACK_S = 0.0002
+META = D.meta("ui", "UI tick: two short sine pings separated by a gap, the second transposed and quieter.", ["ui", "tick", "tock", "ping", "notification", "short"], "decaying sines")
+
+
+class UiTick(Block):
+    ID = "ui_tick"
+    PARAMS = [
+        D.param("tone_hz", "Hz", 600, 9000, 2500, "log", "pitch of the first ping"),
+        D.param("ratio2", "x tone", 0.5, 2.0, 0.75, "log", "pitch of the second ping over the first"),
+        D.param("gap_s", "s", 0.01, 0.25, 0.06, "log", "time between the pings"),
+        D.param("second_db", "dB re first", -30, 0, -4, "lin", "second ping level"),
+        D.param("decay_s", "s (T60)", 0.002, 0.08, 0.02, "log", "time to fall 60 dB"),
+        D.AMP(-14.0), D.ONSET(),
+    ]
+
+    def synth(self, v, t, sr):
+        o = v["onset_s"]
+
+        def ping(start, f):
+            return torch.sin(2.0 * math.pi * f * torch.clamp(t - start, min=0.0)) * D.decay(t, start, v["decay_s"], ATTACK_S)
+
+        y = ping(o, v["tone_hz"]) + db_to_amp(v["second_db"]) * ping(o + v["gap_s"], v["tone_hz"] * v["ratio2"])
+        return db_to_amp(v["amp_db"]) * y
+
+
+BLOCK = UiTick

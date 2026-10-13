@@ -1,0 +1,87 @@
+{
+  "id": "sine_env",
+  "family": "oscillator",
+  "description": "Sine with an exponential pitch glide and a linear attack, exponential 60 dB decay. Blips, pops, subdrops, kicks. (12 October 2026)",
+  "tags": [
+    "tonal",
+    "sine",
+    "glide",
+    "blip",
+    "subdrop",
+    "kick"
+  ],
+  "sources": [
+    {
+      "what": "phase accumulation and exponential envelope",
+      "url": null,
+      "licence": "original (derived from the mathematics)"
+    }
+  ],
+  "licence": "original",
+  "params": [
+    {
+      "name": "freq_hz",
+      "unit": "Hz",
+      "min": 30.0,
+      "max": 12000.0,
+      "default": 440.0,
+      "scale": "log",
+      "description": "start frequency"
+    },
+    {
+      "name": "glide_st",
+      "unit": "semitones",
+      "min": -24.0,
+      "max": 24.0,
+      "default": 0.0,
+      "scale": "lin",
+      "description": "pitch reached at the end of the glide"
+    },
+    {
+      "name": "glide_s",
+      "unit": "s",
+      "min": 0.005,
+      "max": 2.0,
+      "default": 0.1,
+      "scale": "log",
+      "description": "glide time constant"
+    },
+    {
+      "name": "amp_db",
+      "unit": "dBFS",
+      "min": -60.0,
+      "max": 0.0,
+      "default": -12.0,
+      "scale": "lin",
+      "description": "peak amplitude"
+    },
+    {
+      "name": "onset_s",
+      "unit": "s",
+      "min": 0.0,
+      "max": 0.25,
+      "default": 0.02,
+      "scale": "lin",
+      "description": "start time in the window"
+    },
+    {
+      "name": "attack_s",
+      "unit": "s",
+      "min": 0.0005,
+      "max": 0.3,
+      "default": 0.005,
+      "scale": "log",
+      "description": "linear attack"
+    },
+    {
+      "name": "decay_s",
+      "unit": "s (T60)",
+      "min": 0.01,
+      "max": 4.0,
+      "default": 0.5,
+      "scale": "log",
+      "description": "time to fall 60 dB"
+    }
+  ],
+  "date": "12 October 2026"
+}

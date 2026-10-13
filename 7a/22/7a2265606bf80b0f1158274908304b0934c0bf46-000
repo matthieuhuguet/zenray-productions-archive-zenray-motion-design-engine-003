@@ -1,0 +1,104 @@
+# 13 October 2026: generic runner of the music pipeline for any reference slug (the OneKey scripts took their paths
+# from datasets/resynth-params.json; this runner overrides them per slug through ZRMD_RESYNTH_OVERRIDES, so the
+# same resynthesis, critic and stages run on a new video without editing code).
+# Chain: separate stems (Demucs, once) -> TranscribeMusic -> ResynthMusic stages -> MusicCritic.
+# Usage: python -I Scripts/MusicRun.py --slug claude-opus-5-5 [--stages own,sms,bus] [--critic]
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import subprocess
+import sys
+from pathlib import Path
+
+ENGINE = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(ENGINE))
+from zrmd import settings  # noqa: E402
+
+PY = settings.get("paths.python") if hasattr(settings, "get") else sys.executable
+
+
+def slug_paths(slug: str) -> dict:
+    sound = settings.path("sound_out") / slug
+    cache = settings.path("refcache") / slug
+    meta = json.loads((settings.path("workshop") / "references" / slug / "reference.json").read_text(encoding="utf-8"))
+    return {"score": str(sound / "music-bench" / "score.json"), "bench": str(sound / "music-bench"),
+            "stems": str(cache / "stems" / "out" / "htdemucs" / "mix"), "referenceVideo": str(cache / meta["file_name"]),
+            "cache": str(cache / "music-bench-cache"), "instruments": "music-instruments"}
+
+
+def env_for(slug: str, extra: dict | None = None) -> dict:
+    env = dict(os.environ)
+    over = {"paths": slug_paths(slug)}
+    if extra:
+        over.update(extra)
+    env["ZRMD_RESYNTH_OVERRIDES"] = json.dumps(over)
+    return env
+
+
+def run(cmd: list[str], env: dict) -> int:
+    print("$", " ".join(cmd), flush=True)
+    return subprocess.run(cmd, env=env).returncode
+
+
+def ensure_stems(slug: str) -> None:
+    cache = settings.path("refcache") / slug
+    out = cache / "stems" / "out" / "htdemucs" / "mix"
+    if (out / "drums.wav").exists():
+        return
+    meta = json.loads((settings.path("workshop") / "references" / slug / "reference.json").read_text(encoding="utf-8"))
+    (cache / "stems").mkdir(parents=True, exist_ok=True)
+    subprocess.run(["ffmpeg", "-v", "error", "-y", "-i", str(cache / meta["file_name"]), "-vn", "-ac", "2", "-ar", "44100", str(cache / "stems" / "mix.wav")], check=True)
+    subprocess.run([PY, "-I", "-m", "demucs", "-n", "htdemucs", "-d", "mps", "-o", "out", "mix.wav"], cwd=cache / "stems", check=True)
+
+
+def main() -> int:
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--slug", required=True)
+    ap.add_argument("--stages", default="", help="comma list of ResynthMusic --stage values, run in order")
+    ap.add_argument("--transcribe", action="store_true")
+    ap.add_argument("--base", default="", help="version the first stage starts from (default: none, i.e. the stage default)")
+    ap.add_argument("--roles", default="", help="roles for the sms stage only (comma list), all when empty")
+    ap.add_argument("--tool", default="", help="another Scripts/<name>.py that reads RS.params(), with its arguments, e.g. 'DiagnoseResynth.py V_009 drums vocals'")
+    ap.add_argument("--critic", action="store_true")
+    ap.add_argument("--set", action="append", default=[], help="extra a.b=json override (resynth params)")
+    a = ap.parse_args()
+    ensure_stems(a.slug)
+    env = env_for(a.slug)
+    if a.tool:  # 13 October 2026: run one OneKey-era tool on any slug (the paths come from the overrides)
+        name, *rest = a.tool.split()
+        return run([PY, "-I", str(ENGINE / "Scripts" / name), *rest], env)
+    if a.transcribe:
+        run([PY, "-I", str(ENGINE / "Scripts" / "TranscribeMusic.py"), "--slug", a.slug], env)
+    sets = [x for s in a.set for x in ("--set", s)]
+    bench = Path(slug_paths(a.slug)["bench"])
+
+    def newest() -> str | None:
+        vs = sorted(p.name for p in bench.glob("V_*") if (p / "mix.wav").exists())
+        return vs[-1] if vs else None
+
+    base = a.base or None
+    for st in [s for s in a.stages.split(",") if s]:
+        frm = ["--from", base] if base else []
+        if st == "sms" and a.roles:
+            frm += ["--roles", a.roles]
+        # 13 October 2026: every stage starts from the newest version (the chain own, sms, bus, dev, gap, retag)
+        if run([PY, "-I", str(ENGINE / "Scripts" / "ResynthMusic.py"), "build", "--stage", st, *frm, *sets], env) != 0:
+            print("stage failed:", st)
+            return 1
+        after = newest()
+        if after == base:  # 13 October 2026: the stage wrote somewhere else (or nothing): never continue silently
+            print(f"stage {st} produced no new version in {bench}: stopping")
+            return 1
+        base = after
+    if a.critic:
+        bench = Path(slug_paths(a.slug)["bench"])
+        versions = sorted(p.name for p in bench.glob("V_*") if (p / "mix.wav").exists())
+        if versions:
+            run([PY, "-I", str(ENGINE / "Scripts" / "MusicCritic.py"), "--version", versions[-1]], env)
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

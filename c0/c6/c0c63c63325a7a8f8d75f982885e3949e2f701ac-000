@@ -1,0 +1,191 @@
+#!/usr/bin/env python3
+# 12 October 2026: task M3, independent critic of a music-bench version. Re-scores every stem and the mix with an
+# implementation of tfBands written here from scratch (numpy rfft, own third-octave triangles, own framing), so a bug in
+# resynth.tf_bands_score cannot hide itself; compares with the stored scores.json; splits the remaining error into what
+# blocks 99 (band groups, sections, onset frames against sustain frames, missing energy against extra energy); and
+# measures the ceiling of the measure itself on the reference (1 ms shift, random phase on an exact STFT magnitude).
+#   MusicCritic.py --version V_NNN [--ceilings] [--json OUT] [--selftest]
+# --selftest proves the critic both ways: the reference against itself scores 100 (green) and a reference with one
+# third-octave group muted, or shifted by 80 ms, scores at least 3 points lower (red; the 500 to 2000 Hz mute measures 4.6, 12 October 2026). Exit 0 only when both hold.
+# FR : critique independante d'une version du banc musical, avec son propre calcul de tfBands et le diagnostic.
+import os
+
+for _k in ("OMP_NUM_THREADS", "VECLIB_MAXIMUM_THREADS", "OPENBLAS_NUM_THREADS", "MKL_NUM_THREADS"):
+    os.environ.setdefault(_k, "1")
+import argparse
+import json
+import math
+import sys
+from concurrent.futures import ProcessPoolExecutor
+from pathlib import Path
+
+import numpy as np
+
+ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(ROOT))
+from zrmd.audio import resynth as RS  # noqa: E402
+
+# 12 October 2026: the critic's own settings (the interface), equal to the published tfBands settings by default.
+CFG = {"nFft": 4096, "hop": 2048, "fMin": 30.0, "fMax": 16000.0, "bandsPerOct": 3, "jndDb": 2.0, "floorDb": 60.0, "base": 0.99,
+       "groupsHz": [[30, 120], [120, 500], [500, 2000], [2000, 6000], [6000, 16000]], "onsetWindowS": 0.1, "missDb": 6.0,
+       "selftestDropMin": 3.0, "agreeTol": 1.0, "workers": 16}
+STEMS = ["drums", "bass", "other", "vocals", "mix"]
+
+
+def bands(sr):
+    """Own third-octave triangles on the rfft bins (independent of resynth._band_weights). FR : bandes propres."""
+    c = CFG["fMin"] * 2 ** (np.arange(0, int(CFG["bandsPerOct"] * math.log2(CFG["fMax"] / CFG["fMin"])) + 1) / CFG["bandsPerOct"])
+    f = np.fft.rfftfreq(CFG["nFft"], 1.0 / sr)
+    lf = np.log2(np.maximum(f, 1e-6))
+    lc = np.log2(c)
+    step = 1.0 / CFG["bandsPerOct"]
+    W = np.maximum(0.0, 1.0 - np.abs(lf[None, :] - lc[:, None]) / step)
+    return c, W
+
+
+def band_power(x, sr, W):
+    n, h = CFG["nFft"], CFG["hop"]
+    x = np.pad(np.asarray(x, np.float64), (n // 2, n // 2), mode="reflect")
+    m = 1 + (len(x) - n) // h
+    win = np.hanning(n + 1)[:-1]
+    idx = np.arange(n)[None, :] + h * np.arange(m)[:, None]
+    S = np.abs(np.fft.rfft(x[idx] * win, axis=1)) ** 2
+    return 10 * np.log10(S @ W.T + 1e-20).T  # [bands, frames]
+
+
+def compare(ref, ours, sr):
+    c, W = bands(sr)
+    n = min(len(ref), len(ours))
+    r, o = band_power(ref[:n], sr, W), band_power(ours[:n], sr, W)
+    fl = r.max() - CFG["floorDb"]
+    r2, o2 = np.maximum(r, fl), np.maximum(o, fl)
+    w = np.maximum(r2, o2) - fl
+    d = o2 - r2
+    E = float((w * np.abs(d)).sum() / (w.sum() + 1e-9) / CFG["jndDb"])
+    return {"E": E, "score": 100 * CFG["base"] ** (E * E), "c": c, "w": w, "d": d, "r": r2, "o": o2}
+
+
+def share_needed(E):
+    # E for score 99: 0.99 ** E^2 = 0.99 -> E = 1.
+    return E
+
+
+def diagnose(cmp, times, sections, onsets):
+    c, w, d = cmp["c"], cmp["w"], cmp["d"]
+    tot = float((w * np.abs(d)).sum()) + 1e-9
+    out = {"E": round(cmp["E"], 4), "score": round(cmp["score"], 3), "groups": [], "sections": [], "split": {}}
+    for a, b in CFG["groupsHz"]:
+        m = (c >= a) & (c < b)
+        ww = w[m]
+        out["groups"].append({"hz": [a, b], "errorShare": round(float((ww * np.abs(d[m])).sum()) / tot, 3),
+                              "meanAbsDb": round(float((ww * np.abs(d[m])).sum() / (ww.sum() + 1e-9)), 2),
+                              "signedDb": round(float((ww * d[m]).sum() / (ww.sum() + 1e-9)), 2)})
+    for s in sections:
+        f = (times >= s["start"]) & (times < s["end"])
+        ww = w[:, f]
+        out["sections"].append({"start": s["start"], "end": s["end"], "errorShare": round(float((ww * np.abs(d[:, f])).sum()) / tot, 3),
+                                "meanAbsDb": round(float((ww * np.abs(d[:, f])).sum() / (ww.sum() + 1e-9)), 2),
+                                "signedDb": round(float((ww * d[:, f]).sum() / (ww.sum() + 1e-9)), 2)})
+    on = np.zeros(len(times), bool)
+    for t in onsets:
+        on |= (times >= t - 0.02) & (times < t + CFG["onsetWindowS"])
+    miss = d < -CFG["missDb"]
+    extra = d > CFG["missDb"]
+    for name, mask in (("onsetFrames", np.broadcast_to(on, d.shape)), ("sustainFrames", np.broadcast_to(~on, d.shape)),
+                       ("missingEnergy", miss), ("extraEnergy", extra), ("within6Db", ~miss & ~extra)):
+        out["split"][name] = round(float((w * np.abs(d) * mask).sum()) / tot, 3)
+    # What E would be if one kind of error vanished (the lever of each fix). FR : levier de chaque correction.
+    def E_without(mask):
+        return float((w * np.abs(d) * ~mask).sum() / (w.sum() + 1e-9) / CFG["jndDb"])
+    out["ifFixed"] = {k: round(100 * CFG["base"] ** (E_without(m) ** 2), 2) for k, m in
+                      (("missingEnergy", miss), ("extraEnergy", extra), ("onsetFrames", np.broadcast_to(on, d.shape)),
+                       ("lowUnder120Hz", np.broadcast_to((c < 120)[:, None], d.shape)))}
+    return out
+
+
+def _job(args):
+    name, ref, ours, sr, times_sections_onsets = args
+    cmp = compare(ref, ours, sr)
+    times = np.arange(cmp["d"].shape[1]) * CFG["hop"] / sr
+    sections, onsets = times_sections_onsets
+    return name, diagnose(cmp, times, sections, onsets)
+
+
+def _ceiling_job(args):
+    name, ref, sr = args
+    import librosa
+    rng = np.random.default_rng(1)
+    out = {}
+    sh = np.concatenate([np.zeros(int(0.001 * sr)), ref])[: len(ref)]
+    out["shift1ms"] = round(compare(ref, sh, sr)["score"], 3)
+    for nfft in (512, 2048):
+        S = librosa.stft(ref, n_fft=nfft, hop_length=nfft // 4)
+        ph = np.exp(2j * np.pi * rng.random(S.shape))
+        y = librosa.istft(np.abs(S) * ph, hop_length=nfft // 4, length=len(ref))
+        out[f"randomPhase{nfft}"] = round(compare(ref, y, sr)["score"], 3)
+    return name, out
+
+
+def load(version, P):
+    sr = P["sampleRate"]
+    bench = Path(P["paths"]["bench"])
+    ref = RS.load_reference(P)
+    d = bench / version
+    ours = {k: RS.mono(RS._read(d / ("mix.wav" if k == "mix" else f"stems/{k}.wav"), sr)) for k in STEMS}
+    refs = {k: RS.mono(ref["mix"] if k == "mix" else ref["stems"][k]) for k in STEMS}
+    score = json.loads((d / "score.json").read_text())
+    return refs, ours, score, sr, d
+
+
+def selftest(P):
+    refs, _, score, sr, _ = load("V_025", P)
+    x = refs["mix"]
+    green = compare(x, x, sr)["score"]
+    sh = np.concatenate([np.zeros(int(0.08 * sr)), x])[: len(x)]
+    red_shift = compare(x, sh, sr)["score"]
+    import scipy.signal as ss
+    sos = ss.butter(4, [500, 2000], btype="bandstop", fs=sr, output="sos")
+    red_mute = compare(x, ss.sosfilt(sos, x), sr)["score"]
+    # Agreement with the published implementation on a known non-trivial case (the 80 ms shift).
+    pub = RS.tf_bands_score(x, sh, sr, P)
+    ok = green >= 99.999 and green - red_shift >= CFG["selftestDropMin"] and green - red_mute >= CFG["selftestDropMin"] and abs(pub - red_shift) <= CFG["agreeTol"]
+    res = {"green": round(green, 3), "redShift80ms": round(red_shift, 3), "redMute500to2000": round(red_mute, 3),
+           "publishedOnShift": pub, "agree": abs(pub - red_shift) <= CFG["agreeTol"], "pass": ok}
+    print(json.dumps(res, indent=1))
+    return ok
+
+
+def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--version", default="V_025")
+    ap.add_argument("--ceilings", action="store_true")
+    ap.add_argument("--json")
+    ap.add_argument("--selftest", action="store_true")
+    a = ap.parse_args()
+    P = RS.params()
+    if a.selftest:
+        sys.exit(0 if selftest(P) else 1)
+    refs, ours, score, sr, d = load(a.version, P)
+    secs = [{"start": s["start"], "end": s["end"]} for s in score["sections"]]
+    ons = {k: RS.stem_events(score, k) for k in STEMS}
+    ons["mix"] = sorted(h["t"] for h in score["drums"])
+    jobs = [(k, refs[k], ours[k], sr, (secs, ons.get(k, []))) for k in STEMS]
+    with ProcessPoolExecutor(max_workers=CFG["workers"]) as ex:
+        res = dict(ex.map(_job, jobs))
+        ceil = dict(ex.map(_ceiling_job, [(k, refs[k], sr) for k in STEMS])) if a.ceilings else None
+    stored = {}
+    if (d / "scores.json").exists():
+        h = json.loads((d / "scores.json").read_text())["headline"]
+        stored = {k: h.get(k, {}).get("tfBands") for k in STEMS}
+    out = {"date": "12 October 2026", "version": a.version, "critic": CFG,
+           "tfBandsIndependent": {k: res[k]["score"] for k in STEMS}, "tfBandsStored": stored,
+           "agreement": {k: (None if stored.get(k) is None else round(res[k]["score"] - stored[k], 3)) for k in STEMS},
+           "diagnosis": res, "ceilings": ceil}
+    s = json.dumps(out, indent=1)
+    if a.json:
+        Path(a.json).write_text(s + "\n")
+    print(s)
+
+
+if __name__ == "__main__":
+    main()

@@ -1,0 +1,41 @@
+# 12 October 2026: F3 family selection. Runs the F1 matcher (zrmd.vector.fontfit.match_font) over the whole font
+# dataset on clean reference marks (coverage maps of zrmd.vector.marks), and writes the ranking per mark.
+import json
+import sys
+import time
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+import numpy as np  # noqa: E402
+from PIL import Image  # noqa: E402
+
+from zrmd import settings  # noqa: E402
+from zrmd.vector import fontfit, marks as K  # noqa: E402
+
+
+
+def main():
+    slug = "onekey-pro-2"
+    ids = sys.argv[1:]
+    inv = {m["id"]: m for m in K.inventory(slug)["marks"]}
+    out = {}
+    for mid in ids:
+        m = inv[mid]
+        d = K.mark_cache(slug, mid)
+        rgb = np.asarray(Image.open(d / "crop.png").convert("RGB"))
+        cv = K.coverage(rgb, m.get("occluders"))
+        t, l, b, r = K.ink_crop_box(cv["c"], settings.get("vector.marks.coverage.crop_margin_px"))
+        ref = cv["c"][t:b, l:r] * cv["weight"][t:b, l:r]
+        t0 = time.time()
+        res = fontfit.match_font(ref, m["text"])
+        out[mid] = {"seconds": round(time.time() - t0, 1), "coarse": res["coarse"],
+                    "fits": [{k: f.get(k) for k in ("family", "file", "iou", "edge_mean", "loss", "size", "axes", "tracking_em")}
+                             for f in res["fits"]]}
+        print(mid, out[mid]["seconds"], [(f["family"], f["iou"]) for f in out[mid]["fits"][:6]], flush=True)
+    dst = K.REFCACHE / slug / "f3" / f"family-match-{'-'.join(ids)}.json"
+    dst.write_text(json.dumps(out, indent=1, default=float))
+    print(dst)
+
+
+if __name__ == "__main__":
+    main()

@@ -1,0 +1,58 @@
+# 12 October 2026 (A2): proves the effect insert of bank.mix_modules both ways. A chain source -> effect -> effect is
+# rendered (mono and stereo), then refitted by dfit with the same chain (green, score >= bank.verify.recoverMin) and
+# with the effects removed (red, score <= bank.verify.wrongMax). Exit 0 when both hold.
+# Usage: python -I Scripts/CheckA2Chain.py [--json]
+# FR : preuve dans les deux sens qu'une chaîne source puis effets se rend et se réajuste.
+from __future__ import annotations
+
+import json
+import os
+import sys
+from pathlib import Path
+
+os.environ.setdefault("OMP_NUM_THREADS", "4")
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+import numpy as np  # noqa: E402
+
+from zrmd.audio import bank, config, dfit, fxdsp  # noqa: E402
+
+CHAIN = {"sr": 48000, "seconds": 1.0, "masterGainDb": 0.0, "blocks": [
+    {"block": "pluck_ks", "params": {"f0_hz": 247.0, "decay_s": 0.9, "brightness": 0.6, "amp_db": -26.0, "onset_s": 0.03}, "gainDb": 0.0, "offsetS": 0.0, "seed": 0},
+    {"block": "delay_echo", "params": {"time_s": 0.21, "feedback": 0.4, "damp_hz": 3500.0, "mix": 0.45, "out_db": 0.0}, "gainDb": 0.0, "offsetS": 0.0, "seed": 0},
+    {"block": "stereo_pan", "params": {"pan": -0.4, "out_db": 0.0}, "gainDb": 0.0, "offsetS": 0.0, "seed": 0}]}
+
+JITTER = {"f0_hz": 1.02, "decay_s": 1.2, "brightness": 0.85, "time_s": 1.04, "damp_hz": 1.3, "mix": 0.8}
+JITTER_ADD = {"amp_db": 2.0, "onset_s": 0.004, "feedback": 0.06, "pan": 0.15, "out_db": -1.0}
+
+
+def main() -> int:
+    v = config.get("bank.verify")
+    target = bank.render_chain(CHAIN)
+    stereo = fxdsp.render_chain_stereo(CHAIN)
+    # Green: refit from a start NEAR the truth (every parameter moved, JITTER), which proves that gradients flow through
+    # source, echo and pan together. A blind joint fit of the 15 parameters from the defaults was measured at 85.7
+    # (887 s, 12 October 2026): blind multi-block chains need a staged search, not this plumbing check.
+    # FR : réajustement depuis un départ proche de la vérité ; l'ajustement aveugle à 15 paramètres reste ouvert.
+    start = {**CHAIN, "blocks": [{**b, "params": {k: x * JITTER.get(k, 1.0) + JITTER_ADD.get(k, 0.0) for k, x in b["params"].items()}}
+                                 for b in CHAIN["blocks"]]}
+    # 12 October 2026 (A2, second run): with the default polish budget this refit stopped at 99.10 (656 s); the
+    # coupled source, echo and pan levels need the longer polish of the hard single blocks. FR : polissage plus long.
+    # 12 October 2026 (A2 resume): the third run (1086 s) still stopped at 99.11 with f0 247.10 and echo 0.2110 s: the
+    # direct sound and its echo interfere through f0 * time_s, a narrow coupled valley, hence a joint evolution group
+    # on (f0_hz, time_s). FR : vallée couplée hauteur et temps d'écho, recherche conjointe.
+    green = dfit.fit(target, start, device="cpu", overrides={"screenSamples": 0, "polishRounds": 24, "scanRounds": 6, "esIters": 30, "esSamples": 80,
+                                                             "scanGroups": [["f0_hz", "time_s"], ["time_s", "feedback", "mix", "damp_hz"], "*"]})  # the given start only
+    blind = {**CHAIN, "blocks": [{**b, "params": {}} for b in CHAIN["blocks"]]}
+    red = dfit.fit(target, {**blind, "blocks": blind["blocks"][:1]}, device="cpu")
+    out = {"date": "12 October 2026", "stereoShape": list(stereo.shape),
+           "leftEqualsMono": bool(np.allclose(stereo[0], target, atol=1e-6)), "rightDiffers": bool(not np.allclose(stereo[1], target, atol=1e-3)),
+           "green": {"score": green["score"], "b1": (green["b1"] or {}).get("score"), "seconds": green["seconds"],
+                     "fitted": green["params"], "truth": [b["params"] for b in CHAIN["blocks"]]},  # 12 October 2026: which parameter misses
+           "red": {"score": red["score"], "b1": (red["b1"] or {}).get("score"), "seconds": red["seconds"]}}
+    out["pass"] = bool(out["leftEqualsMono"] and out["rightDiffers"] and green["score"] >= v["recoverMin"] and red["score"] <= v["wrongMax"])
+    print(json.dumps(out, indent=1))
+    return 0 if out["pass"] else 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())

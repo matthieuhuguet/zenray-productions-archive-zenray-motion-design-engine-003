@@ -1,0 +1,80 @@
+{
+  "id": "reverb_fdn",
+  "family": "reverb",
+  "kind": "effect",
+  "description": "Eight-line feedback delay network with a Householder matrix, exact frequency-domain evaluation (size, T60, damping, predelay, mix all differentiable). Rooms, plates, halls. (12 October 2026)",
+  "tags": [
+    "effect",
+    "reverb",
+    "fdn",
+    "room",
+    "hall",
+    "plate"
+  ],
+  "sources": [
+    {
+      "what": "feedback delay network",
+      "url": null,
+      "reference": "J.-M. Jot and A. Chaigne, Digital delay networks for designing artificial reverberators, AES 90th Convention, 1991",
+      "licence": "original (derived from the published mathematics, no code copied)"
+    }
+  ],
+  "licence": "original",
+  "params": [
+    {
+      "name": "t60_s",
+      "unit": "s",
+      "min": 0.1,
+      "max": 3.0,
+      "default": 1.0,
+      "scale": "log",
+      "description": "decay time at low frequencies"
+    },
+    {
+      "name": "hf_ratio",
+      "unit": "x",
+      "min": 0.1,
+      "max": 1.0,
+      "default": 0.5,
+      "scale": "log",
+      "description": "T60 at high frequencies relative"
+    },
+    {
+      "name": "size",
+      "unit": "x",
+      "min": 0.3,
+      "max": 2.0,
+      "default": 1.0,
+      "scale": "log",
+      "description": "scales every delay line (room size)"
+    },
+    {
+      "name": "predelay_s",
+      "unit": "s",
+      "min": 0.0,
+      "max": 0.1,
+      "default": 0.01,
+      "scale": "lin",
+      "description": "delay before the network"
+    },
+    {
+      "name": "mix",
+      "unit": "0..1",
+      "min": 0.0,
+      "max": 1.0,
+      "default": 0.3,
+      "scale": "lin",
+      "description": "wet share, equal power"
+    },
+    {
+      "name": "out_db",
+      "unit": "dB",
+      "min": -24.0,
+      "max": 12.0,
+      "default": 0.0,
+      "scale": "lin",
+      "description": "output gain"
+    }
+  ],
+  "date": "12 October 2026"
+}

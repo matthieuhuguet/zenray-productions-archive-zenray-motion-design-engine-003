@@ -1,0 +1,51 @@
+# 12 October 2026 (A4): shimmer_partials, six partials at f0 * k^stretch, each doubled by a detuned twin (beating) and
+# all amplitude modulated by a slow tremolo, with a soft attack and a long decay (shimmers, sparkles, magic UI). Gap
+# measured by the A3 calibration: shimmer stft error 2.2 JND, its best chains layered noise. Parameter categories:
+# pitch (f0_hz, stretch, detune_cents), motion (am_hz, am_depth), colour (tilt_db_oct, attack_s, decay_s), level
+# (amp_db, onset_s). Derived from the mathematics, no code copied. FR : partielles désaccordées en battement, trémolo lent.
+import math
+
+import torch
+
+from zrmd.audio import sfxdsp as D
+from zrmd.audio.bank import Block, db_to_amp
+
+K = 6
+META = D.meta("modal", "Shimmer partials: six partials doubled by detuned twins that beat, a slow tremolo, soft attack and long decay.",
+              ["tonal", "shimmer", "sparkle", "magic", "pad", "chorus", "beating", "ui"], "detuned partial pairs with amplitude modulation")
+
+
+class ShimmerPartials(Block):
+    ID = "shimmer_partials"
+    # 12 October 2026 (A4): a slow tremolo (under 1 Hz) trades against the decay inside a 1 s window (verify-new1.json,
+    # draw 1 stopped at 99.25 with am_depth 0.03 and a shorter decay), hence the am_depth/decay_s pair, more starts, and
+    # am_hz bounded at 2 Hz from below (the identical 99.249 after more starts showed a basin issue, not a budget one).
+    FIT = {"starts": 12, "scanRounds": 4, "screenSamples": 768,
+           "scanPairs": [["f0_hz", "stretch"], ["am_hz", "am_depth"], ["am_depth", "decay_s"], ["attack_s", "decay_s"]]}
+    PARAMS = [
+        D.param("f0_hz", "Hz", 100, 6000, 1200, "log", "lowest partial"),
+        D.param("stretch", "exponent", 0.8, 2.0, 1.0, "lin", "partial k sits at f0 * k^stretch"),
+        D.param("detune_cents", "cents", 0, 60, 12, "lin", "detuning of each twin"),
+        D.param("am_hz", "Hz", 2.0, 30, 6, "log", "tremolo rate (a shimmer flutters; a slower swell is the attack and decay)"),
+        D.param("am_depth", "0..1", 0.0, 1.0, 0.4, "lin", "tremolo depth"),
+        D.param("tilt_db_oct", "dB/octave", -30, 6, -9, "lin", "level of partial k per octave of k"),
+        D.param("attack_s", "s", 0.001, 0.5, 0.03, "log", "attack time"),
+        D.param("decay_s", "s (T60)", 0.05, 6.0, 1.2, "log", "decay"),
+        D.AMP(-18.0), D.ONSET(0.25, 0.02),
+    ]
+
+    def synth(self, v, t, sr):
+        dev = t.device
+        k = torch.arange(1, K + 1, device=dev, dtype=torch.float32)
+        f = v["f0_hz"] * torch.pow(k, v["stretch"])
+        g = torch.pow(10.0, v["tilt_db_oct"] * torch.log2(k) / 20.0) * (f < 0.45 * sr).float()
+        u = torch.clamp(t - v["onset_s"], min=0.0)
+        tw = f * torch.pow(2.0, v["detune_cents"] / 1200.0)
+        pair = torch.sin(2.0 * math.pi * f[:, None] * u[None, :]) + torch.sin(2.0 * math.pi * tw[:, None] * u[None, :] + 1.0)
+        y = (g[:, None] * pair).sum(0) / torch.sqrt(2.0 * (g * g).sum() + 1e-12)
+        am = 1.0 - v["am_depth"] * 0.5 * (1.0 - torch.cos(2.0 * math.pi * v["am_hz"] * u))
+        env = D.decay(t, v["onset_s"], v["decay_s"], v["attack_s"])
+        return db_to_amp(v["amp_db"]) * y * am * env
+
+
+BLOCK = ShimmerPartials

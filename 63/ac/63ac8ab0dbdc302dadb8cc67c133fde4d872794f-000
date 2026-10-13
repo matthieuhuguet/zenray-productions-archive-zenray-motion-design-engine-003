@@ -1,0 +1,629 @@
+# 12 October 2026: S1 look inventory of onekey-pro-2, measured.
+# Reads the local reference cache only, writes numbers (colours, sizes, timings) into
+# datasets/shaders/looks-onekey.json and two analysis crops per look into the reference cache
+# onekey-pro-2/looks/ folder (local, never archived, never used as a texture).
+# Run: ~/.venvs/zenray-motion/bin/python -I Scripts/MeasureLooksOnekey.py
+from __future__ import annotations
+
+import glob
+import json
+import subprocess
+from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
+
+import cv2
+import numpy as np
+
+# 12 October 2026: parameters of the measurement, one place.
+ENGINE = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(ENGINE))
+from zrmd import settings  # noqa: E402  (13 October 2026: the workshop no longer sits next to the repository)
+WORKSHOP = settings.path("workshop")
+REF_DIR = Path("/Users/zenray/.claude/tmp/tmp-zenray-motion-design-refcache/onekey-pro-2")
+VIDEO = glob.glob(str(REF_DIR / "*.mp4"))[0]
+BIBLE = WORKSHOP / "references/onekey-pro-2/bible.json"
+CROPS = settings.path("refcache") / "onekey-pro-2" / "looks"  # 13 October 2026: reference crops live in the cache, never in the archived workshop
+FRAMES = CROPS / "_frames"  # full-resolution analysis frames, local only
+OUT_JSON = ENGINE / "datasets/shaders/looks-onekey.json"
+SMALL_W, SMALL_H, SMALL_FPS = 480, 270, 30
+FULL_W, FULL_H = 1920, 1080
+WORKERS = 16
+
+
+def luma(img):
+    # 12 October 2026: Rec. 709 luma on 0..255 sRGB values (no linearisation, matches what the eye reads on a frame).
+    img = img.astype(np.float32)
+    return 0.2126 * img[..., 0] + 0.7152 * img[..., 1] + 0.0722 * img[..., 2]
+
+
+def hexc(rgb):
+    r, g, b = [int(round(float(x))) for x in rgb]
+    return f"#{r:02x}{g:02x}{b:02x}"
+
+
+def rgb(v):
+    return [int(round(float(x))) for x in v]
+
+
+def full_frame(t: float) -> np.ndarray:
+    # 12 October 2026: one lossless PNG per analysis time, decoded once and cached locally.
+    FRAMES.mkdir(parents=True, exist_ok=True)
+    p = FRAMES / f"t{t:07.3f}.png"
+    if not p.exists():
+        subprocess.run(["ffmpeg", "-v", "error", "-ss", f"{t:.3f}", "-i", VIDEO, "-frames:v", "1", "-y", str(p)], check=True)
+    return cv2.cvtColor(cv2.imread(str(p)), cv2.COLOR_BGR2RGB)
+
+
+def small_stream() -> np.ndarray:
+    # 12 October 2026: whole film at 480x270, 30 fps, for timing curves.
+    raw = subprocess.run(["ffmpeg", "-v", "error", "-i", VIDEO, "-vf", f"scale={SMALL_W}:{SMALL_H},fps={SMALL_FPS}",
+                          "-f", "rawvideo", "-pix_fmt", "rgb24", "-"], check=True, capture_output=True).stdout
+    return np.frombuffer(raw, np.uint8).reshape(-1, SMALL_H, SMALL_W, 3)
+
+
+def sub(img, box):
+    # 12 October 2026: box = [x0, y0, x1, y1] as fractions of the frame.
+    h, w = img.shape[:2]
+    x0, y0, x1, y1 = box
+    return img[int(y0 * h):max(int(y0 * h) + 1, int(y1 * h)), int(x0 * w):max(int(x0 * w) + 1, int(x1 * w))]
+
+
+def box_stats(img, box):
+    a = sub(img, box).reshape(-1, 3).astype(np.float32)
+    l = luma(a)
+    return {"box": box, "median_rgb": rgb(np.median(a, 0)), "hex": hexc(np.median(a, 0)), "mean_rgb": rgb(a.mean(0)),
+            "luma_p5": round(float(np.percentile(l, 5)), 1), "luma_p95": round(float(np.percentile(l, 95)), 1)}
+
+
+def ramp_by_luma(img, box, pcts=(5, 25, 50, 75, 95), min_luma=0.0):
+    # 12 October 2026: colour of the pixels at given luma percentiles, i.e. the colour ramp a gradient block must reproduce.
+    a = sub(img, box).reshape(-1, 3).astype(np.float32)
+    l = luma(a)
+    keep = l >= min_luma
+    a, l = a[keep], l[keep]
+    order = np.argsort(l)
+    out = []
+    for p in pcts:
+        win = order[max(0, int(p / 100 * len(order)) - 200):int(p / 100 * len(order)) + 200]
+        c = np.median(a[win], 0)
+        out.append({"pct": p, "rgb": rgb(c), "hex": hexc(c), "luma": round(float(luma(c[None])[0]), 1)})
+    return out
+
+
+def halo_profile(img, box, core_luma=235, dists=(0, 2, 4, 8, 16, 32, 64)):
+    # 12 October 2026: mean luma as a function of the distance (px at 1080p) from the saturated core = bloom falloff.
+    a = sub(img, box)
+    l = luma(a)
+    core = (l >= core_luma).astype(np.uint8)
+    if core.sum() < 5:
+        return {"core_px": int(core.sum())}
+    d = cv2.distanceTransform(1 - core, cv2.DIST_L2, 5)
+    prof = []
+    for i, dd in enumerate(dists):
+        hi = dists[i + 1] if i + 1 < len(dists) else dd * 2
+        m = (d > dd) & (d <= hi) if dd > 0 else core.astype(bool)
+        if m.sum():
+            prof.append({"from_px": dd, "to_px": hi, "mean_luma": round(float(l[m].mean()), 1),
+                         "mean_rgb": rgb(a[m].mean(0))})
+    return {"core_px": int(core.sum()), "core_luma_threshold": core_luma, "profile": prof}
+
+
+def sharpness_grid(img, n=3):
+    # 12 October 2026: variance of the Laplacian per cell, normalised to the sharpest cell: a depth of field map.
+    g = cv2.cvtColor(img, cv2.COLOR_RGB2GRAY)
+    h, w = g.shape
+    out = []
+    for r in range(n):
+        row = []
+        for c in range(n):
+            cell = g[r * h // n:(r + 1) * h // n, c * w // n:(c + 1) * w // n]
+            row.append(float(cv2.Laplacian(cell, cv2.CV_64F).var()))
+        out.append(row)
+    mx = max(max(r) for r in out) or 1.0
+    return [[round(v / mx, 3) for v in r] for r in out]
+
+
+def grain(img, box, sigma=2.0):
+    # 12 October 2026: grain = std of the high-pass luma (image minus a Gaussian blur) in a flat region.
+    l = luma(sub(img, box))
+    hp = l - cv2.GaussianBlur(l, (0, 0), sigma)
+    return {"box": box, "highpass_std": round(float(hp.std()), 3), "mean_luma": round(float(l.mean()), 2)}
+
+
+def ramp_times(t, y, lo=0.1, hi=0.9):
+    # 12 October 2026: rise and fall times (10 to 90 percent of the peak) of a curve.
+    y = np.asarray(y, np.float64)
+    if y.max() <= 0:
+        return {}
+    pk = y.max()
+    above_lo = np.where(y >= lo * pk)[0]
+    above_hi = np.where(y >= hi * pk)[0]
+    r = {"peak": round(float(pk), 2), "t_peak": round(float(t[int(np.argmax(y))]), 3)}
+    if len(above_lo) and len(above_hi):
+        r["rise_start"] = round(float(t[above_lo[0]]), 3)
+        r["rise_end"] = round(float(t[above_hi[0]]), 3)
+        r["fall_start"] = round(float(t[above_hi[-1]]), 3)
+        r["fall_end"] = round(float(t[above_lo[-1]]), 3)
+    return r
+
+
+def save_crop(name, t, box):
+    CROPS.mkdir(parents=True, exist_ok=True)
+    img = sub(full_frame(t), box)
+    p = CROPS / f"{name}.png"
+    cv2.imwrite(str(p), cv2.cvtColor(img, cv2.COLOR_RGB2BGR))
+    return {"file": str(p), "t": t, "box": box, "size": [img.shape[1], img.shape[0]]}
+
+
+# 12 October 2026: the look list. Ranges in seconds, priority computed from screen time.
+LOOKS = [
+    {"id": "void-black-grain", "name": "near-black void background with faint grain",
+     "shots": ["S01", "S02", "S05", "S11", "S16", "S23", "S24", "S25", "S26", "S30"],
+     "ranges": [[0.0, 4.93], [4.93, 6.28], [8.73, 10.2], [15.88, 17.88], [25.4, 29.53], [50.2, 54.05], [54.05, 58.0], [62.0, 68.0]],
+     "families": ["colour", "noise/grain"],
+     "crops": [[5.5, [0.0, 0.0, 0.25, 0.25]], [9.5, [0.0, 0.7, 0.3, 1.0]]]},
+    {"id": "orb-radial-glow", "name": "growing luminous orb with white core, cool interior pools, warm coloured rim and centre spot",
+     "shots": ["S01"], "ranges": [[0.0, 1.45]],
+     "families": ["sdf/mask (disc)", "gradient (radial, polar rim)", "noise (low-frequency colour pools)", "glow/bloom", "time (scale curve)"],
+     "crops": [[0.7, [0.3, 0.0, 0.7, 0.62]], [1.1, [0.2, 0.0, 0.8, 1.0]]]},
+    {"id": "arch-glow-wallpaper", "name": "arch glow wallpaper: black arch silhouette, white core band, navy top, amber and orange rim, centre droplet",
+     "shots": ["S01"], "ranges": [[1.4, 4.93]],
+     "families": ["sdf/mask (power-curve arch)", "gradient (distance ramp, 4 to 6 stops)", "colour (side tint)", "glow/bloom", "sdf (droplet disc with highlight)"],
+     "crops": [[1.5, [0.15, 0.0, 0.85, 1.0]], [1.9, [0.25, 0.3, 0.75, 1.0]]]},
+    {"id": "title-luminance-ramp", "name": "large grey title brightening behind the device (colour transition over time)",
+     "shots": ["S01"], "ranges": [[2.9, 4.93]],
+     "families": ["time (luminance curve)", "typography fill (flat grey)", "mask (occlusion by device and hand)"],
+     "crops": [[3.2, [0.05, 0.38, 0.95, 0.65]], [4.4, [0.05, 0.38, 0.95, 0.65]]]},
+    {"id": "text-card-fade", "name": "small light grey text on black, fade and soft blur-in",
+     "shots": ["S02", "S16", "S26", "captions in S03 to S29"], "ranges": [[4.93, 6.28], [25.4, 29.53], [55.37, 58.0]],
+     "families": ["time (opacity, blur radius)", "blur (gaussian on text layer)", "typography glow (none or very weak)"],
+     "crops": [[5.5, [0.2, 0.38, 0.8, 0.62]], [27.5, [0.25, 0.4, 0.75, 0.6]]]},
+    {"id": "brushed-aluminium-studio", "name": "grey aluminium macro under soft studio light: wide luminance ramps and sharp specular strips",
+     "shots": ["S03", "S04", "S05 (top device)", "S28 (device)"], "ranges": [[6.28, 8.73], [8.73, 10.2]],
+     "families": ["lighting (anisotropic specular, softbox strip)", "gradient (wide luminance ramp)", "noise (fine brushed streaks)", "blur/dof"],
+     "crops": [[6.8, [0.0, 0.0, 0.5, 0.6]], [8.0, [0.0, 0.0, 1.0, 0.75]]]},
+    {"id": "copper-metal-rim", "name": "polished copper rim: dark burnt base, orange mid, pale peach highlights, fresnel at grazing angles",
+     "shots": ["S01 (device edge)", "S05", "S06", "S07", "S09", "S10", "S23", "S24", "S29 (device)"],
+     "ranges": [[2.0, 4.93], [8.73, 13.25], [13.93, 15.88], [50.2, 54.05], [60.8, 62.0]],
+     "families": ["lighting (fresnel, specular, metallic tint)", "gradient (along the edge)", "reflection (blurred environment strip)"],
+     "crops": [[10.9, [0.0, 0.62, 0.7, 1.0]], [50.4, [0.0, 0.82, 0.8, 1.0]]]},
+    {"id": "strata-landscape-wallpaper", "name": "orange layered strata landscape: banded ridges with fine contour lines, red to cream ramp",
+     "shots": ["S06", "S07", "S08", "S09", "S10"], "ranges": [[10.2, 15.88]],
+     "families": ["noise (fbm height, domain warp)", "pattern (contour bands on height)", "gradient (colour ramp red to cream)", "mask (horizon silhouette)"],
+     "crops": [[12.4, [0.25, 0.25, 1.0, 1.0]], [15.2, [0.0, 0.0, 0.5, 1.0]]]},
+    {"id": "grazing-glass-reflection", "name": "dark cover glass seen at grazing angle: smooth grey sky reflection over the wallpaper",
+     "shots": ["S08", "S09"], "ranges": [[13.25, 14.6]],
+     "families": ["gradient (reflection ramp)", "lighting (fresnel)", "blur (soft reflection)", "blend (screen over wallpaper)"],
+     "crops": [[13.6, [0.4, 0.0, 1.0, 0.45]], [14.2, [0.0, 0.0, 0.6, 0.6]]]},
+    {"id": "chip-emissive-iridescent", "name": "glowing chip tops: white emissive plates with iridescent thin-film edges and halo",
+     "shots": ["S11", "S12"], "ranges": [[15.88, 19.6]],
+     "families": ["glow/bloom", "colour (thin-film iridescence on edges)", "sdf (rounded square plates)", "gradient"],
+     "crops": [[16.4, [0.35, 0.0, 0.68, 0.55]], [18.6, [0.25, 0.25, 0.75, 0.65]]]},
+    {"id": "green-light-beams", "name": "parallel light beams (white traces turning green) with bloom and green ambient wash",
+     "shots": ["S11"], "ranges": [[15.88, 17.88]],
+     "families": ["pattern (parallel line sdf)", "glow/bloom (additive)", "time (colour switch, travelling pulse)", "gradient (ambient wash)"],
+     "crops": [[17.0, [0.5, 0.0, 1.0, 0.45]], [16.4, [0.0, 0.5, 0.45, 1.0]]]},
+    {"id": "depth-of-field-blur", "name": "shallow depth of field: sharp focal band, soft foreground and background",
+     "shots": ["S03", "S04", "S12", "S14", "S15", "S18", "S20", "S21", "S22"],
+     "ranges": [[6.28, 8.73], [17.88, 19.6], [22.57, 25.4], [31.8, 34.57], [36.6, 50.2]],
+     "families": ["blur/dof (depth-dependent gaussian or bokeh)"],
+     "crops": [[18.6, [0.0, 0.3, 0.6, 1.0]], [33.0, [0.0, 0.0, 0.6, 0.6]]]},
+    {"id": "studio-bluegrey-backdrop", "name": "smooth blue-grey studio backdrop gradient, lighter on the left, darker right",
+     "shots": ["S13"], "ranges": [[19.6, 22.57]],
+     "families": ["gradient (radial plus linear)", "vignette", "noise/grain"],
+     "crops": [[21.0, [0.0, 0.0, 0.35, 1.0]], [21.0, [0.65, 0.0, 1.0, 1.0]]]},
+    {"id": "low-key-cool-grade", "name": "low-key cinematic grade on live footage: crushed blacks, cool blue and violet tint, screen as light source",
+     "shots": ["S14", "S15", "S17", "S18", "S19", "S20", "S21", "S22"], "ranges": [[22.57, 25.4], [29.53, 50.2]],
+     "families": ["colour (lift gamma gain, tint)", "vignette", "noise/grain", "glow (screen emission)"],
+     "crops": [[22.9, [0.0, 0.0, 1.0, 1.0]], [35.5, [0.0, 0.0, 1.0, 1.0]]]},
+    {"id": "blue-light-sweep", "name": "curved blue and white light arc sweeping along the floor edge, with chromatic fringe",
+     "shots": ["S17"], "ranges": [[29.53, 31.8]],
+     "families": ["sdf (arc band)", "glow/bloom", "time (sweep along a path)", "colour (chromatic fringe)"],
+     "crops": [[30.6, [0.6, 0.6, 1.0, 1.0]], [30.0, [0.0, 0.25, 0.4, 0.9]]]},
+    {"id": "neon-ring-glow", "name": "screen ring gauge glowing like neon: orange arc, white and blue segments, strong halo",
+     "shots": ["S23", "S24", "S21 (on screen)"], "ranges": [[50.2, 51.68]],
+     "families": ["sdf (arc segment)", "glow/bloom", "gradient (along arc)", "lighting (glossy tube highlight)"],
+     "crops": [[50.4, [0.25, 0.0, 1.0, 0.75]], [50.9, [0.3, 0.2, 0.75, 0.8]]]},
+    {"id": "screen-ui-emission", "name": "device screen UI as emitter: saturated blue and violet tiles, light spilling on hands",
+     "shots": ["S14", "S15", "S19", "S21", "S22", "S24", "S25"], "ranges": [[22.57, 25.4], [34.57, 36.6], [39.4, 50.2], [51.68, 55.37]],
+     "families": ["gradient (tile fills)", "sdf (rounded tiles)", "glow (emission spill)"],
+     "crops": [[50.4, [0.0, 0.0, 0.3, 0.45]], [42.0, [0.45, 0.1, 0.75, 0.8]]]},
+    {"id": "smoke-letters-volumetric", "name": "huge letters filled with marbled smoke or flame, three colour variants (blue, silver, copper)",
+     "shots": ["S27", "S28", "S29"], "ranges": [[58.0, 62.0]],
+     "families": ["noise (fbm, domain warp, ridged)", "gradient (colour ramp per variant)", "mask (glyph sdf)", "volumetric (fog spill)", "glow/bloom"],
+     "crops": [[58.7, [0.02, 0.15, 0.4, 0.8]], [61.3, [0.6, 0.15, 0.98, 0.8]]]},
+    {"id": "reflective-floor-fog", "name": "glossy black floor reflecting the letters, low fog band at the horizon",
+     "shots": ["S27", "S28", "S29"], "ranges": [[58.0, 62.0]],
+     "families": ["reflection (mirrored, blurred, attenuated)", "gradient (fog band)", "noise (fog turbulence)"],
+     "crops": [[58.7, [0.0, 0.75, 1.0, 1.0]], [60.0, [0.0, 0.7, 1.0, 1.0]]]},
+    {"id": "dark-device-fresnel-rim", "name": "black device body read only by a thin bright fresnel rim and soft reflections",
+     "shots": ["S05 (bottom device)", "S13", "S27"], "ranges": [[8.73, 10.2], [19.6, 22.57], [58.0, 59.53]],
+     "families": ["lighting (fresnel rim)", "sdf (rounded rect outline)", "gradient"],
+     "crops": [[21.0, [0.35, 0.0, 0.65, 1.0]], [58.7, [0.38, 0.2, 0.62, 0.95]]]},
+    {"id": "bloom-halo", "name": "generic bloom around saturated emitters (orb rim, chips, beams, ring, sweep)",
+     "shots": ["S01", "S11", "S12", "S17", "S23"], "ranges": [[0.0, 1.45], [15.88, 19.6], [29.53, 31.8], [50.2, 51.68]],
+     "families": ["glow/bloom (multi-scale gaussian, additive)"],
+     "crops": [[16.4, [0.42, 0.05, 0.62, 0.42]], [50.4, [0.4, 0.0, 0.8, 0.3]]]},
+    {"id": "logo-colour-fade", "name": "end mark fading in with a copper gradient, turning white, then fading to black",
+     "shots": ["S30"], "ranges": [[62.0, 68.0]],
+     "families": ["time (colour transition)", "gradient (vertical copper ramp)", "mask (mark shape, own design)"],
+     "crops": [[63.3, [0.4, 0.3, 0.6, 0.7]], [64.0, [0.4, 0.3, 0.6, 0.7]]]},
+    {"id": "dip-to-black-transitions", "name": "dips to black and fades between shots",
+     "shots": ["all"], "ranges": [],
+     "families": ["time (opacity curve, multiply to black)"],
+     "crops": [[62.3, [0.0, 0.0, 1.0, 1.0]], [29.55, [0.0, 0.0, 1.0, 1.0]]]},
+]
+
+
+def title_colour(f):
+    # 12 October 2026: median colour of the low-saturation light pixels of the title band (glyphs only).
+    band = sub(f, [0.6, 0.4, 0.95, 0.63]).reshape(-1, 3).astype(np.float32)
+    mx, mn = band.max(-1), band.min(-1)
+    sel = ((mx - mn) / np.maximum(mx, 1) < 0.12) & (mx > 25)
+    return {"glyph_px": int(sel.sum()), "hex": hexc(np.median(band[sel], 0)) if sel.sum() else None}
+
+
+# 12 October 2026: measured summaries written after reading the numbers of this script.
+SUMMARY = {
+ "void-black-grain": "Pure digital black: corner median #000000, luma p95 0, high-pass std 0.0 (no grain at all on 3D and graphic shots). 27 percent of all frames have a mean luma under 8. A flat colour, no noise layer.",
+ "low-key-cool-grade": "Live shots: luma p50 between 14 (S19) and 56 (S21), p99 100 to 208, shadows p10 #000000 to #060606 (crushed blacks). Mid tones blue shifted, mean B minus R +4 (S14) to +17 (S22); S19 mids #100c1f and S22 mids #211b41 are violet. Corner over centre luma 0.78 at 22.9 s (vignette). Live grain high-pass std 0.31 to 0.36.",
+ "depth-of-field-blur": "Normalised Laplacian variance per 3x3 cell: one sharp cell (1.0) and the rest under 0.05 on live shots (22.9, 33.0, 38.0); S03 a sharp vertical band in the centre column (0.5 to 1.0) with sides under 0.24; S12 sharp top left and centre, soft right column (0.016).",
+ "screen-ui-emission": "Blue tile ramp by luma #031d69, #042cb1, #0b70bd, #bac7da (50.4 s); violet screen #221f72, #3d4ab2, #919bd5, #cdd4e9 (42.0 s); skin lit by the screen #4c3737 median.",
+ "copper-metal-rim": "Body ramp #1f0603, #331005, #4f2114, #96492f, #dc9174 (10.9 s, p5 to p95); lit rim ramp #a63d21, #f1a563, #f5bc7c, #fcd9a8 (50.4 s). Bible accents #ae4b2f, #c84523, #dd7225. Highlights stay warm (never pure white).",
+ "bloom-halo": "Mean luma by distance from the saturated core (0-2, 2-4, 4-8, 8-16, 16-32, 32-64, 64-128 px at 1080p): chip 249, 211, 200, 190, 173, 133, 76; ring 243, 171, 143, 109, 81, 58, 42; orb rim 210, 156, 138, 117, 98, 83, 62; green beam core #baf8ae then #0b7c07, #066803, #064e03, #064104, #043603, #042d03. Wide tails: a sum of about three gaussians (radius near 3, 15, 60 px) is the expected fit.",
+ "text-card-fade": "Text colour #e5e5e5 at full, mid fade #909090. S02 holds 4.93 to 5.73 then softens to 218 luma by 6.23. S16: three phrases, the swap at 27.0 to 27.4 dips to luma 51. S26: in 55.4 to 55.7 (0.3 s), out at 56.4 to 56.6, second phrase in 56.6 to 57.0, out 57.8 to 58.0. Blur-in seen on the S01 brand word at 1.9 s.",
+ "logo-colour-fade": "Mark appears at 62.55 s, copper rising #421b12, #552817, #6f361f, #844123 to #bb5d2e at 63.0 s, dims to #522f1f at 63.3 s, turns white #777777, #babbba, #fdfdfd from 63.4 to 63.6 s, holds to 66.1 s, hard cut to black at 66.2 s, black to 68.0 s. The reproduction draws its own mark.",
+ "dark-device-fresnel-rim": "Black body #101012 (luma 10 to 24); rim pixels p90 #677c97, p98 #bbc2cb (58.7 s, cool rim); S13 edge p98 #929cb0. Only a thin cool fresnel line describes the shape.",
+ "strata-landscape-wallpaper": "Colour ramp by luma at 12.4 s: #8d0005, #ac1c06, #c03106, #d3400b, #e6600c, #f19e34 (deep red to amber, cream peaks near #fbce8c); 15.2 s adds near black rock #121414 to #212320. Dominant fine band period 54 px at 1080p (0.05 of the height) on a vertical line at x 0.78.",
+ "smoke-letters-volumetric": "Letter ramps by luma (p10, p30, p50, p70, p90, p98): blue S27 #080910, #10151d, #212a37, #465972, #9ba9be, #c1c6ce; silver S28 #1d212a, #535862, #8d8e97, #b7b8bf, #d3d4d6, #e0e0e0; copper S29 #1a0400, #290b00, #34180b, #642a13, #c5674b, #cdb88d. Fog band at y 0.66 to 0.74: #334256, #a8aab0, #301002.",
+ "reflective-floor-fog": "Floor (y 0.85 to 1.0) medians #151c28, #636670, #080101; floor over letter band luma ratio 0.83, 0.89, 0.37; floor sharpness 0.7 to 6 percent of the letters (strong vertical blur of the reflection).",
+ "brushed-aluminium-studio": "Neutral grey (R = G = B): ramp #080808, #0f0f0f, #1b1b1b, #6b6b6b, #cecece (6.8 s). Specular strips are sharp: on y 0.3 the profile jumps #5e5e5e, #d0d0d0, #070707 within 0.07 of the width. Highlight band #9c9b9a at 8.0 s. Surface high-pass std 0.85 (fine texture, not grain).",
+ "chip-emissive-iridescent": "Chip top ramp #76818d, #ada7ae, #bebebd, #dadade, #fefdff with magenta, green and cyan fringes on the edges; dark board #27282d. Halo as in bloom-halo.",
+ "arch-glow-wallpaper": "Vertical profile through the apex at 1.5 s: #000031 at the top edge, #000012 at 0.1 to 0.2, #04234f at 0.32, #335a80 at 0.37, #8092a8 at 0.42, #d6d6d8 at 0.58, cyan edge #81b4ce at 0.63, deep blue #01076e at 0.68, black arch from 0.74. On the flank (1.9 s, x 0.33): white #d6d6d4 down to cream #d8d5c8, amber #b59e52, #9a6e1f, #743908, #4c1100 at the bottom. Across the arch edge at y 0.85: white, amber #be9846, dark red #1e0001, then black within about 0.03 of the width.",
+ "studio-bluegrey-backdrop": "Lighter on the left: top left #4d5e72, mid left #5c6b7f, bottom left #68748a; right side dark #131620 (top) and #1f2534 (bottom). Horizontal ramp at y 0.2 from #5b6a7e to #141721, nearly linear; vertical ramp at x 0.1 from #48586b to #627086 (brighter downward). Grain high-pass std 0.31.",
+ "blue-light-sweep": "Visible 30.0 to 30.9 s (rise 30.1 to 30.37, peak 30.4, fall 30.47 to 30.9). Centroid travels from (0.65, 0.82) to (0.98, 0.96) of the frame along the floor curve. Colour #1a7fcb with a thin white core; halo short (luma 208 at the core, 63 at 2 to 4 px).",
+ "title-luminance-ramp": "Neutral grey title, luma p90 37 at 3.0 s rising linearly about 120 luma per second to 252 at 4.8 s (ease none). Colour #3d3d3d at 3.2 s, #c7c7c7 at 4.4 s.",
+ "green-light-beams": "White traces (#fefefe, thin) from 15.9 s; green coverage 1.8 percent at 15.97 s, jump to 7 percent at 16.57 s, hold to 17.07 s, gone by 17.17 s. Beam core #92e889 (green white), ambient wash #010f00, halo #0b7c07 down to #042d03.",
+ "neon-ring-glow": "Orange arc #e68945 (median of orange pixels), white arc ramp #91a8c0, #dfeaf7, #f0f8ff, #f7fcff (blue white), warm halo tail #51352d at 32 to 64 px.",
+ "orb-radial-glow": "Radius (fraction of height) 0.007 at 0.13 s, 0.070 at 0.33 s, 0.170 at 0.53 s, 0.283 at 0.73 s, 0.400 at 1.03 s, 0.482 at 1.23 s, then clipped; centre (0.499, 0.49 to 0.52). At 0.7 s interior #d4d6d7, rim amber #d48d0f at the top and #c3a34c at the bottom, sides #d5d6d1, thin dark red outer edge #510f03. At 1.1 s upper pool #5a89b3, lower pool #18add2, centre #d0d2d2, ring 0.5 to 0.8 #99c3d0. Centre spot: small dark droplet with a highlight (sizes already fitted by zrmd/shaders/archglow.py dot_y, dot_r).",
+ "grazing-glass-reflection": "Cool grey reflection #292d30 (13.6 s, upper right), warm grey #564d4f (14.2 s); vertical ramp #1c2022 to #4c5053 down to the horizon, then the wallpaper.",
+ "dip-to-black-transitions": "See cuts list: a cut is flagged when either side reaches mean luma under 3 while the neighbour shot is brighter than 6.",
+}
+
+
+def union_seconds(ranges):
+    iv = sorted(ranges)
+    tot, cur = 0.0, None
+    for a, b in iv:
+        if cur is None or a > cur[1]:
+            if cur:
+                tot += cur[1] - cur[0]
+            cur = [a, b]
+        else:
+            cur[1] = max(cur[1], b)
+    if cur:
+        tot += cur[1] - cur[0]
+    return round(tot, 2)
+
+
+def measure(small, bible):
+    ts = np.arange(len(small)) / SMALL_FPS
+    L = luma(small.reshape(len(small), -1, 3)).reshape(len(small), SMALL_H, SMALL_W)
+    m = {}
+
+    # 12 October 2026: void black and grain.
+    f55, f95 = full_frame(5.5), full_frame(9.5)
+    m["void-black-grain"] = {
+        "black_corner_5.5": box_stats(f55, [0.0, 0.0, 0.25, 0.25]),
+        "black_corner_9.5": box_stats(f95, [0.0, 0.0, 0.25, 0.25]),
+        "grain_black": grain(f55, [0.0, 0.0, 0.25, 0.25]),
+        "share_frames_mean_luma_below_8": round(float((L.mean((1, 2)) < 8).mean()), 3),
+    }
+
+    # 12 October 2026: orb radius, centre and colour field.
+    orb = []
+    for i in range(0, int(1.45 * SMALL_FPS)):
+        mask = L[i] > 40
+        a = mask.sum()
+        if a < 4:
+            continue
+        ys, xs = np.nonzero(mask)
+        orb.append({"t": round(float(ts[i]), 3), "radius_h": round(float(np.sqrt(a / np.pi) / SMALL_H), 4),
+                    "cx_w": round(float(xs.mean() / SMALL_W), 4), "cy_h": round(float(ys.mean() / SMALL_H), 4)})
+    f07, f11 = full_frame(0.7), full_frame(1.1)
+
+    def orb_field(f):
+        l = luma(f)
+        mask = (l > 40).astype(np.uint8)
+        ys, xs = np.nonzero(mask)
+        cx, cy, r = xs.mean(), ys.mean(), np.sqrt(mask.sum() / np.pi)
+        yy, xx = np.mgrid[0:f.shape[0], 0:f.shape[1]]
+        rr = np.hypot(xx - cx, yy - cy) / r
+        ang = np.degrees(np.arctan2(yy - cy, xx - cx))  # 0 = right, 90 = down
+        rad = []
+        for a0, a1 in [(0, 0.2), (0.2, 0.5), (0.5, 0.8), (0.8, 0.95), (0.95, 1.05), (1.05, 1.3)]:
+            sel = (rr >= a0) & (rr < a1)
+            rad.append({"r_from": a0, "r_to": a1, "median_rgb": rgb(np.median(f[sel], 0)), "hex": hexc(np.median(f[sel], 0))})
+        rim = []
+        for a_c in range(-180, 180, 45):
+            sel = (rr > 0.9) & (rr < 1.0) & (np.abs(((ang - a_c + 180) % 360) - 180) < 22.5)
+            rim.append({"angle_deg_0_right_90_down": a_c, "hex": hexc(np.median(f[sel], 0))})
+        pools = []
+        for name, (dx, dy) in {"upper": (0, -0.5), "lower": (0, 0.55), "left": (-0.55, 0), "right": (0.55, 0)}.items():
+            sel = np.hypot(xx - (cx + dx * r), yy - (cy + dy * r)) < 0.12 * r
+            pools.append({"at": name, "hex": hexc(np.median(f[sel], 0))})
+        return {"centre_px": [round(float(cx), 1), round(float(cy), 1)], "radius_px": round(float(r), 1),
+                "radial": rad, "rim_polar": rim, "interior_pools": pools}
+    m["orb-radial-glow"] = {"track": orb[::3], "field_0.7": orb_field(f07), "field_1.1": orb_field(f11),
+                            "halo_1.1": halo_profile(f11, [0.0, 0.0, 1.0, 1.0], core_luma=200)}
+
+    # 12 October 2026: arch wallpaper, vertical profile through the apex (fullscreen moment) and in-screen moment.
+    f15, f19, f23 = full_frame(1.5), full_frame(1.9), full_frame(2.3)
+
+    def vprofile(f, x, y0, y1, n=20):
+        col = f[:, int(x * f.shape[1]) - 3:int(x * f.shape[1]) + 3].astype(np.float32).mean(1)
+        return [{"y": round(y, 3), "hex": hexc(col[min(f.shape[0] - 1, int(y * f.shape[0]))])}
+                for y in np.linspace(y0, y1, n)]
+
+    def hprofile(f, y, x0, x1, n=16):
+        row = f[int(y * f.shape[0]) - 3:int(y * f.shape[0]) + 3].astype(np.float32).mean(0)
+        return [{"x": round(x, 3), "hex": hexc(row[min(f.shape[1] - 1, int(x * f.shape[1]))])}
+                for x in np.linspace(x0, x1, n)]
+    m["arch-glow-wallpaper"] = {
+        "vprofile_1.5_x0.5": vprofile(f15, 0.5, 0.0, 1.0),
+        "hprofile_1.5_y0.9": hprofile(f15, 0.9, 0.1, 0.9),
+        "vprofile_1.9_x0.5_apex": vprofile(f19, 0.5, 0.3, 1.0),
+        "vprofile_1.9_x0.33_side": vprofile(f19, 0.33, 0.3, 1.0),
+        "hprofile_1.9_y0.85": hprofile(f19, 0.85, 0.25, 0.75),
+        "vprofile_2.3_x0.5_in_screen": vprofile(f23, 0.5, 0.2, 0.95),
+        "note": "apex of the dark arch sits under the centre droplet; at 1.5 s the wallpaper fills the frame, from 2.0 s it lives inside the device screen.",
+    }
+
+    # 12 October 2026: title brightness curve (low-saturation light pixels in the title band).
+    i0, i1 = int(2.8 * SMALL_FPS), int(4.93 * SMALL_FPS)
+    tl = []
+    for i in range(i0, i1):
+        band = small[i, int(0.4 * SMALL_H):int(0.63 * SMALL_H), int(0.6 * SMALL_W):int(0.95 * SMALL_W)].astype(np.float32)
+        mx, mn = band.max(-1), band.min(-1)
+        sat = (mx - mn) / np.maximum(mx, 1)
+        sel = (sat < 0.12) & (mx > 25)
+        tl.append(float(np.percentile(luma(band[sel]), 90)) if sel.sum() > 200 else 0.0)
+    tl = np.array(tl)
+    m["title-luminance-ramp"] = {"curve_every_0.1s": [{"t": round(float(ts[i0 + k]), 2), "luma_p90": round(float(tl[k]), 1)}
+                                                       for k in range(0, len(tl), 3)],
+                                 "timing": ramp_times(ts[i0:i1], tl),
+                                 "colour_3.2": title_colour(full_frame(3.2)),
+                                 "colour_4.4": title_colour(full_frame(4.4))}
+
+    # 12 October 2026: text card fades, light text pixels in the central band.
+    cards = {}
+    for sid in ["S02", "S16", "S26"]:
+        s = next(x for x in bible["shots"] if x["id"] == sid)
+        a, b = int(s["start"] * SMALL_FPS), int(s["end"] * SMALL_FPS)
+        y = np.array([np.percentile(L[i, int(0.35 * SMALL_H):int(0.65 * SMALL_H)], 99.7) for i in range(a, b)])
+        cards[sid] = {"timing": ramp_times(ts[a:b], y),
+                      "curve_every_0.2s": [{"t": round(float(ts[a + k]), 2), "luma_p99.7": round(float(y[k]), 1)} for k in range(0, len(y), 6)]}
+    txt = full_frame(5.5)
+    sel = luma(txt) > 120
+    cards["text_colour_5.5"] = hexc(np.median(txt[sel], 0)) if sel.sum() else None
+    t27 = full_frame(27.5)
+    sel = luma(t27) > 120
+    cards["text_colour_27.5"] = hexc(np.median(t27[sel], 0)) if sel.sum() else None
+    m["text-card-fade"] = cards
+
+    # 12 October 2026: aluminium macro.
+    f68, f80 = full_frame(6.8), full_frame(8.0)
+    m["brushed-aluminium-studio"] = {
+        "ramp_6.8": ramp_by_luma(f68, [0.0, 0.0, 1.0, 1.0]),
+        "ramp_8.0": ramp_by_luma(f80, [0.0, 0.0, 1.0, 1.0]),
+        "hprofile_6.8_y0.3": hprofile(f68, 0.3, 0.0, 1.0),
+        "highlight_strip_8.0": box_stats(f80, [0.0, 0.62, 0.25, 0.72]),
+        "grain_6.8": grain(f68, [0.05, 0.05, 0.25, 0.25]),
+    }
+
+    # 12 October 2026: copper rim.
+    f109, f504, f530 = full_frame(10.9), full_frame(50.4), full_frame(53.0)
+    m["copper-metal-rim"] = {
+        "ramp_10.9_lower": ramp_by_luma(f109, [0.0, 0.7, 1.0, 1.0], min_luma=8),
+        "ramp_50.4_edge": ramp_by_luma(f504, [0.0, 0.85, 0.8, 1.0], min_luma=8),
+        "device_back_53.0": ramp_by_luma(f530, [0.38, 0.1, 0.62, 0.75], min_luma=8),
+        "accent_from_bible": ["#ae4b2f", "#c84523", "#dd7225"],
+    }
+
+    # 12 October 2026: strata, colour ramp and band period.
+    f124, f152, f136, f142 = full_frame(12.4), full_frame(15.2), full_frame(13.6), full_frame(14.2)
+    col = luma(f124[int(0.3 * FULL_H):int(0.95 * FULL_H), int(0.78 * FULL_W)])
+    gk = np.exp(-0.5 * (np.arange(-60, 61) / 20.0) ** 2); gk /= gk.sum()
+    col = col - np.convolve(col, gk, mode="same")
+    spec = np.abs(np.fft.rfft(col * np.hanning(len(col))))
+    freqs = np.fft.rfftfreq(len(col))
+    lo = freqs > 1 / 200
+    k = np.argmax(spec * lo)
+    m["strata-landscape-wallpaper"] = {
+        "ramp_12.4": ramp_by_luma(f124, [0.4, 0.3, 1.0, 1.0], pcts=(5, 20, 40, 60, 80, 95), min_luma=10),
+        "ramp_15.2": ramp_by_luma(f152, [0.0, 0.0, 0.5, 1.0], pcts=(5, 20, 40, 60, 80, 95), min_luma=10),
+        "dominant_band_period_px_1080p": round(float(1 / freqs[k]), 1),
+        "band_period_frac_h": round(float(1 / freqs[k] / FULL_H), 4),
+        "upper_left_10.9": box_stats(f109, [0.0, 0.05, 0.15, 0.3]),
+    }
+
+    m["grazing-glass-reflection"] = {
+        "reflection_13.6": box_stats(f136, [0.7, 0.05, 0.98, 0.3]),
+        "reflection_14.2": box_stats(f142, [0.0, 0.05, 0.3, 0.3]),
+        "vprofile_13.6_x0.85": vprofile(f136, 0.85, 0.0, 1.0, 12),
+        "vprofile_14.2_x0.2": vprofile(f142, 0.2, 0.0, 1.0, 12),
+    }
+
+    # 12 October 2026: chips, beams, and their halos.
+    f164, f170, f186 = full_frame(16.4), full_frame(17.0), full_frame(18.6)
+    m["chip-emissive-iridescent"] = {
+        "chip_top_16.4": ramp_by_luma(f164, [0.42, 0.1, 0.62, 0.45], min_luma=60),
+        "chip_halo_16.4": halo_profile(f164, [0.35, 0.0, 0.7, 0.55]),
+        "chip_halo_18.6": halo_profile(f186, [0.25, 0.25, 0.75, 0.65]),
+        "board_18.6": box_stats(f186, [0.0, 0.0, 0.3, 0.25]),
+    }
+    i0, i1 = int(15.88 * SMALL_FPS), int(17.88 * SMALL_FPS)
+    gfrac = []
+    for i in range(i0, i1):
+        f = small[i].astype(np.int16)
+        gfrac.append(float(((f[..., 1] > f[..., 0] + 40) & (f[..., 1] > 60)).mean()))
+    f = f170.astype(np.int16)
+    beam = (f[..., 1] > 180) & (f[..., 1] > f[..., 0] + 60)
+    m["green-light-beams"] = {
+        "beam_core_17.0": hexc(np.median(f170[beam], 0)) if beam.sum() else None,
+        "beam_px_17.0": int(beam.sum()),
+        "ambient_wash_17.0": box_stats(f170, [0.3, 0.02, 0.6, 0.2]),
+        "white_traces_16.4": ramp_by_luma(f164, [0.0, 0.6, 0.4, 1.0], pcts=(90, 97, 99.5), min_luma=0),
+        "green_area_fraction_curve": [{"t": round(float(ts[i0 + k]), 2), "frac": round(gfrac[k], 4)} for k in range(0, len(gfrac), 3)],
+        "green_timing": ramp_times(ts[i0:i1], gfrac),
+        "beam_halo_17.0": halo_profile(f170, [0.55, 0.0, 1.0, 0.45], core_luma=170),
+    }
+
+    # 12 October 2026: depth of field maps.
+    m["depth-of-field-blur"] = {f"sharpness_3x3_{t}": sharpness_grid(full_frame(t)) for t in [6.8, 8.0, 18.6, 22.9, 33.0, 38.0, 47.0]}
+
+    f210 = full_frame(21.0)
+    m["studio-bluegrey-backdrop"] = {
+        "corners_21.0": {k: box_stats(f210, b) for k, b in {
+            "top_left": [0.0, 0.0, 0.1, 0.1], "top_right": [0.9, 0.0, 1.0, 0.1], "bottom_left": [0.0, 0.9, 0.1, 1.0],
+            "bottom_right": [0.9, 0.9, 1.0, 1.0], "upper_mid_right": [0.75, 0.2, 0.85, 0.3], "mid_left": [0.05, 0.45, 0.15, 0.55]}.items()},
+        "hprofile_21.0_y0.2": hprofile(f210, 0.2, 0.0, 1.0),
+        "vprofile_21.0_x0.1": vprofile(f210, 0.1, 0.0, 1.0, 12),
+        "grain_21.0": grain(f210, [0.02, 0.02, 0.2, 0.2]),
+    }
+
+    grade = {}
+    for sid in ["S14", "S15", "S17", "S18", "S19", "S20", "S21", "S22"]:
+        s = next(x for x in bible["shots"] if x["id"] == sid)
+        a, b = int(s["start"] * SMALL_FPS), int(s["end"] * SMALL_FPS)
+        px = small[a:b:5].reshape(-1, 3).astype(np.float32)
+        ll = luma(px)
+        grade[sid] = {"luma_p1": round(float(np.percentile(ll, 1)), 1), "luma_p50": round(float(np.percentile(ll, 50)), 1),
+                      "luma_p99": round(float(np.percentile(ll, 99)), 1),
+                      "median_hex": hexc(np.median(px, 0)),
+                      "shadow_hex_p10": hexc(np.median(px[ll < np.percentile(ll, 10)], 0)),
+                      "mid_hex_p50": hexc(np.median(px[(ll > np.percentile(ll, 45)) & (ll < np.percentile(ll, 55))], 0)),
+                      "blue_minus_red_mean": round(float((px[:, 2] - px[:, 0]).mean()), 1)}
+    f229 = full_frame(22.9)
+    lc = luma(f229)
+    grade["vignette_22.9_corner_over_centre"] = round(float(lc[:108, :192].mean() / max(1e-3, lc[432:648, 768:1152].mean())), 3)
+    grade["grain_33.0"] = grain(full_frame(33.0), [0.75, 0.0, 0.95, 0.15])
+    m["low-key-cool-grade"] = grade
+
+    # 12 October 2026: blue sweep path.
+    i0, i1 = int(29.53 * SMALL_FPS), int(31.8 * SMALL_FPS)
+    path = []
+    for i in range(i0, i1):
+        f = small[i].astype(np.int16)
+        sel = (f[..., 2] > 120) & (f[..., 2] > f[..., 0] + 50)
+        if sel.sum() > 5:
+            ys, xs = np.nonzero(sel)
+            path.append({"t": round(float(ts[i]), 3), "px": int(sel.sum()), "cx_w": round(float(xs.mean() / SMALL_W), 3),
+                         "cy_h": round(float(ys.mean() / SMALL_H), 3)})
+        else:
+            path.append({"t": round(float(ts[i]), 3), "px": 0})
+    f306 = full_frame(30.6).astype(np.int16)
+    sw = (f306[..., 2] > 150) & (f306[..., 2] > f306[..., 0] + 50)
+    white = luma(f306) > 230
+    m["blue-light-sweep"] = {"path_every_0.1s": path[::3], "timing_px": ramp_times(ts[i0:i1], [p["px"] for p in path]),
+                             "blue_hex_30.6": hexc(np.median(f306[sw], 0)) if sw.sum() else None,
+                             "white_core_px_30.6": int((white[int(0.6 * FULL_H):, int(0.6 * FULL_W):]).sum()),
+                             "halo_30.6": halo_profile(full_frame(30.6), [0.6, 0.6, 1.0, 1.0], core_luma=200)}
+
+    f509 = full_frame(50.9).astype(np.int16)
+    f504i = f504.astype(np.int16)
+    orange = (f504i[..., 0] > 200) & (f504i[..., 1] > 90) & (f504i[..., 1] < 200) & (f504i[..., 2] < 110)
+    m["neon-ring-glow"] = {"orange_arc_50.4": hexc(np.median(f504[orange[:, :]], 0)) if orange.sum() else None,
+                           "white_arc_ramp_50.4": ramp_by_luma(f504, [0.45, 0.0, 0.85, 0.2], pcts=(50, 80, 95, 99), min_luma=30),
+                           "halo_50.4": halo_profile(f504, [0.25, 0.0, 1.0, 0.75]),
+                           "halo_50.9": halo_profile(full_frame(50.9), [0.3, 0.2, 0.75, 0.8])}
+
+    f420 = full_frame(42.0)
+    m["screen-ui-emission"] = {"tiles_50.4": ramp_by_luma(f504, [0.0, 0.0, 0.25, 0.4], pcts=(20, 50, 80, 95), min_luma=20),
+                               "screen_42.0": ramp_by_luma(f420, [0.5, 0.15, 0.7, 0.75], pcts=(20, 50, 80, 95), min_luma=20),
+                               "hand_spill_42.0": box_stats(f420, [0.42, 0.7, 0.5, 0.85])}
+
+    smoke = {}
+    floor = {}
+    for sid, t in [("S27", 58.7), ("S28", 60.0), ("S29", 61.3)]:
+        f = full_frame(t)
+        smoke[sid] = {"t": t, "letters_ramp": ramp_by_luma(f, [0.02, 0.15, 0.4, 0.8], pcts=(10, 30, 50, 70, 90, 98), min_luma=6),
+                      "fog_band": box_stats(f, [0.0, 0.66, 1.0, 0.74]),
+                      "top_band": box_stats(f, [0.0, 0.0, 1.0, 0.08])}
+        upper = luma(sub(f, [0.0, 0.55, 1.0, 0.7])).mean()
+        lower = luma(sub(f, [0.0, 0.8, 1.0, 0.95])).mean()
+        floor[sid] = {"t": t, "floor": box_stats(f, [0.0, 0.85, 1.0, 1.0]), "reflection_ratio_floor_over_letters": round(float(lower / max(upper, 1e-3)), 3),
+                      "vertical_sharpness_ratio": round(float(cv2.Laplacian(cv2.cvtColor(sub(f, [0.0, 0.85, 1.0, 1.0]), cv2.COLOR_RGB2GRAY), cv2.CV_64F).var()
+                                                              / max(1e-3, cv2.Laplacian(cv2.cvtColor(sub(f, [0.0, 0.2, 1.0, 0.6]), cv2.COLOR_RGB2GRAY), cv2.CV_64F).var())), 3)}
+    m["smoke-letters-volumetric"] = smoke
+    m["reflective-floor-fog"] = floor
+    f587 = full_frame(58.7)
+    m["dark-device-fresnel-rim"] = {"body_58.7": box_stats(f587, [0.47, 0.4, 0.55, 0.7]),
+                                    "rim_ramp_58.7": ramp_by_luma(f587, [0.38, 0.2, 0.62, 0.95], pcts=(50, 90, 98, 99.5), min_luma=0),
+                                    "edge_21.0": ramp_by_luma(f210, [0.42, 0.0, 0.55, 1.0], pcts=(50, 90, 98, 99.5), min_luma=0)}
+    m["bloom-halo"] = {"orb_rim_1.1": m["orb-radial-glow"]["halo_1.1"], "chip_16.4": m["chip-emissive-iridescent"]["chip_halo_16.4"],
+                       "ring_50.4": m["neon-ring-glow"]["halo_50.4"], "beam_17.0": m["green-light-beams"]["beam_halo_17.0"]}
+
+    # 12 October 2026: end mark colour over time (colour of light pixels in the centre).
+    i0, i1 = int(62.0 * SMALL_FPS), min(len(small), int(68.0 * SMALL_FPS))
+    lc = []
+    for i in range(i0, i1, 3):
+        reg = small[i, int(0.3 * SMALL_H):int(0.7 * SMALL_H), int(0.4 * SMALL_W):int(0.6 * SMALL_W)].reshape(-1, 3).astype(np.float32)
+        ll = luma(reg)
+        sel = ll > 25
+        lc.append({"t": round(float(ts[i]), 2), "px": int(sel.sum()),
+                   "hex": hexc(np.median(reg[sel], 0)) if sel.sum() > 3 else None,
+                   "luma_p95": round(float(np.percentile(ll, 99)), 1)})
+    m["logo-colour-fade"] = {"curve_every_0.1s": lc, "timing": ramp_times(np.array([x["t"] for x in lc]), [x["px"] for x in lc])}
+
+    # 12 October 2026: fades around each cut: mean luma just before and after, and dip depth.
+    ml = L.mean((1, 2))
+    dips = []
+    for c in bible["cuts"]:
+        k = int(round(c["t"] * SMALL_FPS))
+        before = ml[max(0, k - 18):k]
+        after = ml[k:k + 18]
+        if not len(before) or not len(after):
+            continue
+        prev = ml[max(0, k - 45):max(1, k - 18)].mean()
+        nxt = ml[k + 18:k + 45].mean() if k + 45 < len(ml) else after.mean()
+        dips.append({"t": round(c["t"], 3), "kind": c["kind"], "mean_luma_prev": round(float(prev), 1),
+                     "min_last_0.6s": round(float(before.min()), 1), "min_first_0.6s": round(float(after.min()), 1),
+                     "mean_luma_next": round(float(nxt), 1),
+                     "dip_to_black": bool(min(before.min(), after.min()) < 3 and max(prev, nxt) > 6)})
+    m["dip-to-black-transitions"] = {"cuts": dips, "count_dips": int(sum(d["dip_to_black"] for d in dips))}
+    return m
+
+
+def main():
+    bible = json.loads(BIBLE.read_text())
+    times = sorted({c[0] for lk in LOOKS for c in lk["crops"]} | {0.7, 1.1, 1.5, 1.9, 2.3, 3.2, 4.4, 5.5, 6.8, 8.0, 9.5, 10.9, 12.4, 13.6, 14.2,
+                                                                  15.2, 16.4, 17.0, 18.6, 21.0, 22.9, 27.5, 30.6, 33.0, 35.5, 38.0, 42.0, 47.0,
+                                                                  50.4, 50.9, 53.0, 58.7, 60.0, 61.3, 63.3, 64.0})
+    with ThreadPoolExecutor(WORKERS) as ex:
+        list(ex.map(full_frame, times))
+    small = small_stream()
+    meas = measure(small, bible)
+    total = bible["source"]["duration_s"]
+    out = []
+    for lk in LOOKS:
+        crops = [save_crop(f"{lk['id']}-{i + 1}", t, b) for i, (t, b) in enumerate(lk["crops"])]
+        secs = union_seconds(lk["ranges"]) if lk["ranges"] else None
+        out.append({"id": lk["id"], "name": lk["name"], "shots": lk["shots"], "time_ranges_s": lk["ranges"],
+                    "screen_time_s": secs, "screen_share": round(secs / total, 3) if secs else None,
+                    "summary": SUMMARY.get(lk["id"], ""), "block_families": lk["families"], "measured": meas.get(lk["id"], {}), "crops": crops})
+    out.sort(key=lambda x: -(x["screen_time_s"] or 0))
+    for i, x in enumerate(out):
+        x["priority"] = i + 1
+    doc = {"schema": "zrmd/looks@1", "date": "12 October 2026", "slug": "onekey-pro-2",
+           "source": {"video": Path(VIDEO).name, "duration_s": total, "width": FULL_W, "height": FULL_H, "fps": bible["source"]["fps"]},
+           "method": "Measured by Scripts/MeasureLooksOnekey.py on the local reference cache: colours are medians of sRGB pixels, "
+                     "sizes are fractions of the frame (or px at 1080p where stated), timings from a 30 fps 480x270 decode. "
+                     "Crops are analysis-only, local, never archived, never a texture. (12 October 2026)",
+           "looks": out}
+    OUT_JSON.write_text(json.dumps(doc, indent=1, ensure_ascii=False))
+    print(OUT_JSON, len(out))
+
+
+if __name__ == "__main__":
+    main()

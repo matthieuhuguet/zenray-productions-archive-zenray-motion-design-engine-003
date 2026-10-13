@@ -1,0 +1,205 @@
+{
+ "_doc": "12 October 2026: synthetic SVG building blocks for the F2 verifier. Each case is rendered by Skia (skia.SVGDOM), vectorised, re-rendered and compared. expect lists the layer kinds above the background (order free), paints the paint types; wrong forces a primitive on a layer to prove it is rejected.",
+ "canvas": [
+  160,
+  160
+ ],
+ "cases": [
+  {
+   "id": "circle",
+   "bg": "#101418",
+   "body": "<circle cx='80.3' cy='78.6' r='41.7' fill='#e8553a'/>",
+   "expect": [
+    "circle"
+   ],
+   "paints": [
+    "flat"
+   ],
+   "wrong": {
+    "kind": "rect"
+   }
+  },
+  {
+   "id": "ellipse",
+   "bg": "#f4f1ea",
+   "body": "<ellipse cx='81.2' cy='79.4' rx='52.5' ry='27.25' transform='rotate(23 81.2 79.4)' fill='#2b59c3'/>",
+   "expect": [
+    "ellipse"
+   ],
+   "paints": [
+    "flat"
+   ]
+  },
+  {
+   "id": "rect",
+   "bg": "#0c0c0c",
+   "body": "<rect x='34.4' y='51.7' width='92.3' height='57.1' transform='rotate(-14 80.55 80.25)' fill='#ffd23f'/>",
+   "expect": [
+    "rect"
+   ],
+   "paints": [
+    "flat"
+   ]
+  },
+  {
+   "id": "rounded_rect",
+   "bg": "#ffffff",
+   "body": "<rect x='30.5' y='44.2' width='99.6' height='70.3' rx='17.5' ry='17.5' transform='rotate(9 80.3 79.35)' fill='#111827'/>",
+   "expect": [
+    "rounded_rect"
+   ],
+   "paints": [
+    "flat"
+   ],
+   "wrong": {
+    "kind": "circle"
+   }
+  },
+  {
+   "id": "line",
+   "bg": "#1d1d1f",
+   "body": "<line x1='28.3' y1='121.6' x2='131.4' y2='37.2' stroke='#7cdbd5' stroke-width='9.5' stroke-linecap='round'/>",
+   "expect": [
+    "line"
+   ],
+   "paints": [
+    "flat"
+   ]
+  },
+  {
+   "id": "arc",
+   "bg": "#fafafa",
+   "body": "<path d='M 125.2 80.1 A 45.2 45.2 0 1 1 63.4 38.1' fill='none' stroke='#d7263d' stroke-width='10.5' stroke-linecap='round'/>",
+   "expect": [
+    "arc"
+   ],
+   "paints": [
+    "flat"
+   ],
+   "wrong": {
+    "kind": "line"
+   }
+  },
+  {
+   "id": "ring",
+   "bg": "#0b1020",
+   "body": "<circle cx='79.6' cy='80.4' r='48.3' fill='none' stroke='#f2a541' stroke-width='12.4'/>",
+   "expect": [
+    "arc"
+   ],
+   "paints": [
+    "flat"
+   ]
+  },
+  {
+   "id": "stroke_icon",
+   "bg": "#ffffff",
+   "body": "<path d='M 28 86 L 64 120 L 132 42 M 40 30 L 80 30' fill='none' stroke='#16a34a' stroke-width='12' stroke-linecap='round' stroke-linejoin='round'/>",
+   "expect": [
+    "polyline",
+    "line"
+   ],
+   "paints": [
+    "flat",
+    "flat"
+   ],
+   "note": "12 October 2026: the check mark is a polyline primitive (straight strokes joined at a vertex), the bar a line"
+  },
+  {
+   "id": "curve_stroke",
+   "bg": "#ffffff",
+   "body": "<path d='M 24 120 C 44 30 116 130 136 40' fill='none' stroke='#e11d48' stroke-width='10' stroke-linecap='round'/>",
+   "expect": [
+    "stroke_path"
+   ],
+   "paints": [
+    "flat"
+   ],
+   "note": "12 October 2026: a curved stroke stays a stroke_path (editable centre line plus width), not a filled outline",
+   "wrong": {
+    "kind": "polyline"
+   }
+  },
+  {
+   "id": "blob",
+   "bg": "#20232a",
+   "body": "<path d='M 40 70 C 30 30 90 18 112 40 C 140 66 130 120 92 128 C 60 136 50 110 40 70 Z' fill='#61dafb'/>",
+   "expect": [
+    "path"
+   ],
+   "paints": [
+    "flat"
+   ]
+  },
+  {
+   "id": "glyphs",
+   "bg": "#ffffff",
+   "body": "<g transform='translate(14 22)'><path d='M8.044 106.562L8.044 26.533L37.989 26.533Q47.18 26.533 53.454 29.748Q59.729 32.963 62.946 38.733Q66.163 44.503 66.163 52.13Q66.163 59.795 62.917 65.428Q59.671 71.062 53.346 74.121Q47.021 77.18 37.752 77.18L16.405 77.18L16.405 65.3L35.857 65.3Q41.306 65.3 44.75 63.766Q48.194 62.232 49.85 59.295Q51.507 56.358 51.507 52.13Q51.507 47.833 49.85 44.808Q48.194 41.783 44.733 40.161Q41.272 38.539 35.789 38.539L22.387 38.539L22.387 106.562L8.044 106.562ZM53.054 106.562L33.64 70.271L49.311 70.271L69.124 106.562L53.054 106.562Z M95.416 107.804Q89.704 107.804 85.135 105.743Q80.566 103.681 77.924 99.642Q75.281 95.603 75.281 89.676Q75.281 84.597 77.187 81.278Q79.093 77.958 82.358 75.97Q85.624 73.981 89.711 72.962Q93.799 71.943 98.162 71.483Q103.417 70.901 106.675 70.467Q109.933 70.033 111.475 69.071Q113.016 68.11 113.016 66.082L113.016 65.798Q113.016 62.831 111.823 60.777Q110.63 58.723 108.301 57.626Q105.972 56.53 102.536 56.53Q99.052 56.53 96.493 57.602Q93.934 58.674 92.317 60.388Q90.7 62.103 89.946 64.101L77 61.445Q78.788 56.121 82.496 52.656Q86.204 49.191 91.346 47.476Q96.489 45.762 102.48 45.762Q106.706 45.762 111.03 46.767Q115.354 47.773 118.964 50.114Q122.575 52.456 124.776 56.44Q126.977 60.425 126.977 66.417L126.977 106.562L113.622 106.562L113.622 98.282L113.055 98.282Q111.745 100.841 109.382 103.012Q107.02 105.183 103.557 106.494Q100.094 107.804 95.416 107.804ZM98.996 97.427Q103.323 97.427 106.478 95.719Q109.633 94.011 111.363 91.176Q113.094 88.342 113.094 85.018L113.094 77.911Q112.406 78.474 110.786 78.951Q109.166 79.428 107.137 79.799Q105.108 80.171 103.163 80.437Q101.217 80.704 99.859 80.884Q96.716 81.295 94.204 82.284Q91.691 83.273 90.251 85.017Q88.812 86.76 88.812 89.521Q88.812 92.114 90.133 93.871Q91.455 95.627 93.745 96.527Q96.035 97.427 98.996 97.427Z' fill='#0a0a0a'/></g>",
+   "expect": [
+    "path",
+    "path"
+   ],
+   "paints": [
+    "flat",
+    "flat"
+   ]
+  },
+  {
+   "id": "linear_gradient",
+   "bg": "#0e0e10",
+   "body": "<defs><linearGradient id='g' gradientUnits='userSpaceOnUse' x1='30' y1='40' x2='130' y2='120'><stop offset='0' stop-color='#ff5f6d'/><stop offset='1' stop-color='#ffc371'/></linearGradient></defs><rect x='26.5' y='36.5' width='107' height='87' fill='url(#g)'/>",
+   "expect": [
+    "rect"
+   ],
+   "paints": [
+    "linear"
+   ]
+  },
+  {
+   "id": "radial_gradient",
+   "bg": "#000000",
+   "body": "<defs><radialGradient id='g' gradientUnits='userSpaceOnUse' cx='70' cy='72' r='60'><stop offset='0' stop-color='#ffffff'/><stop offset='0.5' stop-color='#8a5cf6'/><stop offset='1' stop-color='#2e1065'/></radialGradient></defs><circle cx='80' cy='80' r='50.5' fill='url(#g)'/>",
+   "expect": [
+    "circle"
+   ],
+   "paints": [
+    "radial"
+   ]
+  },
+  {
+   "id": "blur_disc",
+   "bg": "#0a0a14",
+   "body": "<defs><filter id='b' filterUnits='userSpaceOnUse' x='0' y='0' width='160' height='160'><feGaussianBlur stdDeviation='3'/></filter></defs><circle cx='80.5' cy='79.5' r='36' fill='#5eead4' filter='url(#b)'/>",
+   "expect": [
+    "circle"
+   ],
+   "paints": [
+    "flat"
+   ],
+   "blur": 3.0
+  },
+  {
+   "id": "glow",
+   "bg": "#05050a",
+   "body": "<defs><radialGradient id='g' gradientUnits='userSpaceOnUse' cx='80' cy='80' r='70'><stop offset='0' stop-color='#ffb86b'/><stop offset='1' stop-color='#05050a'/></radialGradient></defs><rect width='160' height='160' fill='url(#g)'/>",
+   "expect": [],
+   "paints": [],
+   "background_paint": "radial"
+  },
+  {
+   "id": "logo",
+   "bg": "#f7f7f2",
+   "body": "<defs><linearGradient id='g' gradientUnits='userSpaceOnUse' x1='20' y1='20' x2='140' y2='140'><stop offset='0' stop-color='#3b82f6'/><stop offset='1' stop-color='#9333ea'/></linearGradient></defs><rect x='20.5' y='20.5' width='119' height='119' rx='26' ry='26' fill='url(#g)'/><circle cx='80' cy='80' r='34.2' fill='none' stroke='#ffffff' stroke-width='9'/><circle cx='80' cy='80' r='11.6' fill='#fde047'/>",
+   "expect": [
+    "rounded_rect",
+    "arc",
+    "circle"
+   ],
+   "paints": [
+    "linear",
+    "flat",
+    "flat"
+   ]
+  }
+ ]
+}

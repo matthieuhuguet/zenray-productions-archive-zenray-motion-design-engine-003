@@ -1,0 +1,41 @@
+// 12 October 2026: open a local page in the managed chrome-headless-shell (never a personal browser) at a given
+// viewport width, and report horizontal overflow, broken images and font use; optional full-page screenshot.
+// FR : verifie une page locale a 375 px dans le navigateur sans tete gere par HyperFrames.
+// Run: node Scripts/CheckPageWidth.mjs <page.html> [width=375] [screenshot.png]
+import { spawnSync } from "node:child_process";
+import { dirname, join, resolve } from "node:path";
+import { fileURLToPath, pathToFileURL } from "node:url";
+import { createRequire } from "node:module";
+
+const TOOLING = join(dirname(dirname(fileURLToPath(import.meta.url))), "tooling");
+const require = createRequire(join(TOOLING, "package.json"));
+const puppeteer = require("puppeteer-core");
+const CLI = join(TOOLING, "node_modules", ".bin", "hyperframes");
+const env = { ...process.env, HYPERFRAMES_NO_TELEMETRY: "1", DO_NOT_TRACK: "1", HYPERFRAMES_NO_UPDATE_CHECK: "1" };
+const browserPath = spawnSync(CLI, ["browser", "path"], { env, encoding: "utf8" }).stdout.trim();
+if (!browserPath.includes("chrome-headless-shell")) { console.error("managed chrome-headless-shell missing"); process.exit(4); }
+
+const [page, widthArg, shot] = process.argv.slice(2);
+const width = Number(widthArg || 375);
+const browser = await puppeteer.launch({ executablePath: browserPath, headless: true,
+  args: ["--allow-file-access-from-files", "--no-first-run", "--disable-extensions"] });
+try {
+  const tab = await browser.newPage();
+  await tab.setViewport({ width, height: 800, deviceScaleFactor: 1 });
+  await tab.goto(pathToFileURL(resolve(page)).href, { waitUntil: "load", timeout: 120000 });
+  await tab.evaluate(async () => { for (const img of document.images) { img.loading = "eager"; } await document.fonts.ready; });
+  await tab.evaluate(() => Promise.all([...document.images].map((i) => i.complete ? 0 : new Promise((r) => { i.onload = i.onerror = r; }))));
+  const report = await tab.evaluate(() => {
+    const doc = document.documentElement;
+    const wide = [...document.querySelectorAll("body *")].filter((e) => e.getBoundingClientRect().right > doc.clientWidth + 0.5)
+      .slice(0, 5).map((e) => e.tagName + "." + e.className);
+    const imgs = [...document.images];
+    return { scrollWidth: doc.scrollWidth, clientWidth: doc.clientWidth, overflow: doc.scrollWidth > doc.clientWidth,
+      wideElements: wide, images: imgs.length, broken: imgs.filter((i) => !i.naturalWidth).map((i) => i.getAttribute("src")).slice(0, 5),
+      brokenCount: imgs.filter((i) => !i.naturalWidth).length,
+      fonts: [...document.fonts].map((f) => f.family + ":" + f.status), bodyFont: getComputedStyle(document.body).fontFamily };
+  });
+  if (shot) await tab.screenshot({ path: shot, fullPage: false });
+  console.log(JSON.stringify({ page, width, ...report }));
+  process.exitCode = report.overflow || report.brokenCount ? 1 : 0;
+} finally { await browser.close(); }

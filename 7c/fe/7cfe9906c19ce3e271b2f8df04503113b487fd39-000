@@ -1,0 +1,16 @@
+# 12 October 2026, 17:30 CEST: merge several FitDeviceScreenStack fit.json files into one keyframe list sorted by frame.
+# Usage: python -I Scripts/MergeScreenFits.py <out fit.json> <fit.json> [<fit.json> ...]
+import json, sys
+from pathlib import Path
+
+out, ins = Path(sys.argv[1]), [Path(p) for p in sys.argv[2:]]
+pairs = {}
+for p in ins:
+    d = json.loads(p.read_text())
+    for f, c in zip(d["frames"], d["compositions"]):
+        pairs[f["frame"]] = (f, c)  # later files win on the same frame
+keys = sorted(pairs)
+out.parent.mkdir(parents=True, exist_ok=True)
+out.write_text(json.dumps({"date": "12 October 2026", "merged_from": [str(p) for p in ins],
+                           "frames": [pairs[k][0] for k in keys], "compositions": [pairs[k][1] for k in keys]}) + "\n")
+print(out, keys)

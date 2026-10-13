@@ -1,0 +1,31 @@
+# 12 October 2026: wood_knock, two decaying modes (f1 and f1 * ratio) plus a tiny band-passed click: wood blocks,
+# knocks on a table, rim clicks. Derived from the mathematics. FR : coup de bois, deux modes et un clic.
+import torch
+
+from zrmd.audio import sfxdsp as D
+from zrmd.audio.bank import Block, db_to_amp
+
+MODE2_DECAY, CLICK_RATIO, CLICK_BW_OCT, CLICK_T60 = 0.6, 4.0, 2.0, 0.002
+META = D.meta("impact", "Wood knock: two decaying modes and a short click. Wood blocks, table knocks, rim clicks.", ["impact", "wood", "knock", "modal", "transient", "foley"], "modal partials and filtered noise click")
+
+
+class WoodKnock(Block):
+    ID = "wood_knock"
+    PARAMS = [
+        D.param("f1_hz", "Hz", 200, 3000, 700, "log", "first mode"),
+        D.param("ratio", "x f1", 1.5, 5.0, 2.7, "log", "second mode over the first"),
+        D.param("decay_s", "s (T60)", 0.01, 0.4, 0.08, "log", "first mode decay"),
+        D.param("mode2_db", "dB re mode 1", -30, 0, -8, "lin", "second mode level"),
+        D.param("click_db", "dB re modes", -40, 0, -16, "lin", "click level"),
+        D.AMP(-12.0), D.ONSET(),
+    ]
+
+    def synth(self, v, t, sr):
+        o, dev = v["onset_s"], t.device
+        f = v["f1_hz"] * torch.stack([torch.ones((), device=dev), v["ratio"]])
+        modes = D.partials(t, o, f, v["decay_s"] * torch.tensor([1.0, MODE2_DECAY], device=dev), torch.stack([torch.ones((), device=dev), db_to_amp(v["mode2_db"])]))
+        click = D.filtered(self.noise(t.shape[0], dev), lambda fr: D.band(fr, v["f1_hz"] * CLICK_RATIO, CLICK_BW_OCT), sr) * D.decay(t, o, CLICK_T60, 0.0001)
+        return db_to_amp(v["amp_db"]) * (modes + db_to_amp(v["click_db"]) * click)
+
+
+BLOCK = WoodKnock

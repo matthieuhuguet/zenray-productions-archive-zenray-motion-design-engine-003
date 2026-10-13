@@ -1,0 +1,284 @@
+{
+  "meta": {
+    "about": "12 October 2026: interface of zrmd/audio/transcribe.py (task M1). Every threshold of the music transcription lives here; override per run with TranscribeMusic.py --set a.b=json.",
+    "units": "seconds unless the key ends in Ms (milliseconds), Hz, Db (decibels) or Semi (semitones)"
+  },
+  "analysis": {
+    "sr": 22050,
+    "drumSr": 44100,
+    "workers": 16
+  },
+  "grid": {
+    "beatsPerBar": 4,
+    "stepsPerBeat": 4,
+    "refineToleranceMs": 40.0
+  },
+  "drums": {
+    "nFft": 1024,
+    "hopMs": 5.0,
+    "bands": {
+      "low": [
+        30.0,
+        250.0
+      ],
+      "mid": [
+        400.0,
+        4000.0
+      ],
+      "high": [
+        6000.0,
+        16000.0
+      ]
+    },
+    "pickDelta": {
+      "low": 0.05,
+      "mid": 0.1,
+      "high": 0.1,
+      "wide": 0.05
+    },
+    "pickWaitMs": 40.0,
+    "pickAvgMs": 120.0,
+    "coincideMs": 20.0,
+    "featureMs": 60.0,
+    "levelMs": 30.0,
+    "kickMaxHz": 110.0,
+    "tomMinSustainMs": 120.0,
+    "midBleedMaxShare": 0.25,
+    "hatOverMidRatio": 1.5,
+    "clapMinSubAttacks": 2,
+    "subAttackRiseDb": 5.0,
+    "noiseFlatness": 0.25,
+    "snareBodyShare": 0.12,
+    "openHatMs": 90.0,
+    "hatDecayDropDb": 20.0,
+    "minDbBelowClassMax": 30.0,
+    "velocityRangeDb": 30.0,
+    "clapMinFlatness": 0.1,
+    "subAttackPeakWithinDb": 12.0,
+    "snapBackMs": 100.0,
+    "riseMs": 20.0,
+    "minRiseDb": {
+      "low": 6.0,
+      "mid": 6.0,
+      "high": 6.0
+    },
+    "tailMergeMs": 120.0,
+    "peakSearchMs": 120.0,
+    "attackDb": 6.0,
+    "tomMaxMidRatio": 0.5,
+    "subAttackMinGapMs": 5.0
+  },
+  "mono": {
+    "frameLength": 4096,
+    "hop": 128,
+    "chunkS": 5.0,
+    "padS": 0.6,
+    "voicedProb": 0.3,
+    "silenceDbBelowMax": 45.0,
+    "stableSemi": 0.6,
+    "minNoteMs": 50.0,
+    "glideMinMs": 30.0,
+    "glideMaxMs": 400.0,
+    "splitRiseDb": 6.0,
+    "onsetDelta": 0.07,
+    "onsetMatchMs": 60.0,
+    "medianFrames": 5,
+    "velocityRangeDb": 30.0,
+    "onsetLookBackMs": 100.0,
+    "glideAbsorbMs": 200.0,
+    "fragmentSemi": 2
+  },
+  "bass": {
+    "fminHz": 30.0,
+    "fmaxHz": 400.0
+  },
+  "poly": {
+    "hop": 256,
+    "binsPerOctave": 36,
+    "fminNote": "C2",
+    "octaves": 7,
+    "minMidi": 36,
+    "maxMidi": 96,
+    "harmonics": 10,
+    "harmonicDecay": 0.8,
+    "spreadBins": 0.8,
+    "noiseComponents": 1,
+    "iterations": 150,
+    "sparsity": 0.0,
+    "hpssMargin": 1.0,
+    "medianFrames": 3,
+    "onDbBelowMax": 26.0,
+    "offDbBelowMax": 32.0,
+    "minNoteMs": 100.0,
+    "splitRiseDb": 6.0,
+    "splitWindowMs": 80.0,
+    "onsetDelta": 0.05,
+    "onsetMatchMs": 35.0,
+    "ghostDb": 12.0,
+    "ghostIntervals": [
+      12,
+      19,
+      24
+    ],
+    "voiceSplitsMidi": [
+      60,
+      72
+    ],
+    "voiceNames": [
+      "otherLow",
+      "otherMid",
+      "otherHigh"
+    ],
+    "velocityRangeDb": 30.0,
+    "vqtGamma": null,
+    "frameRelDb": 15.0,
+    "fundamentalMinDb": -15.0,
+    "neighborDb": 10.0,
+    "neighborIntervals": [
+      1,
+      2
+    ]
+  },
+  "chords": {
+    "minScore": 0.6,
+    "qualities": {
+      "maj": [
+        0,
+        4,
+        7
+      ],
+      "min": [
+        0,
+        3,
+        7
+      ],
+      "7": [
+        0,
+        4,
+        7,
+        10
+      ],
+      "maj7": [
+        0,
+        4,
+        7,
+        11
+      ],
+      "m7": [
+        0,
+        3,
+        7,
+        10
+      ],
+      "sus2": [
+        0,
+        2,
+        7
+      ],
+      "sus4": [
+        0,
+        5,
+        7
+      ],
+      "dim": [
+        0,
+        3,
+        6
+      ],
+      "5": [
+        0,
+        7
+      ],
+      "add9": [
+        0,
+        4,
+        7,
+        2
+      ],
+      "madd9": [
+        0,
+        3,
+        7,
+        2
+      ]
+    }
+  },
+  "vocals": {
+    "tonalMinDb": -50.0,
+    "tonalMinVoiced": 0.3,
+    "fminHz": 80.0,
+    "fmaxHz": 1000.0
+  },
+  "automation": {
+    "windowMs": 100.0,
+    "hopMs": 50.0,
+    "floorDb": -90.0,
+    "textureBandsHz": [
+      [
+        20,
+        250
+      ],
+      [
+        250,
+        2000
+      ],
+      [
+        2000,
+        6000
+      ],
+      [
+        6000,
+        11000
+      ]
+    ]
+  },
+  "render": {
+    "kickHz": [
+      120.0,
+      50.0
+    ],
+    "kickDecayMs": 150.0,
+    "snareToneHz": 190.0,
+    "snareDecayMs": 120.0,
+    "clapGapMs": 10.0,
+    "closedHatMs": 30.0,
+    "openHatMs": 250.0,
+    "tomDecayMs": 200.0,
+    "percDecayMs": 80.0,
+    "attackMs": 4.0,
+    "releaseMs": 30.0,
+    "automationGainDb": [
+      -40.0,
+      24.0
+    ],
+    "automationSilentDb": -80.0
+  },
+  "verify": {
+    "onsetToleranceS": 0.05,
+    "onsetDelta": 0.07,
+    "chromaHop": 512,
+    "chromaEnergyFloorDb": 40.0,
+    "envelopeHopMs": 20.0,
+    "shiftS": 0.08,
+    "shiftSemi": 1,
+    "pass": {
+      "onsetF": {
+        "drums": 0.6,
+        "bass": 0.55,
+        "other": 0.45
+      },
+      "chroma": {
+        "bass": 0.7,
+        "other": 0.7
+      },
+      "envelopeCorr": {
+        "drums": 0.6,
+        "vocals": 0.5
+      }
+    },
+    "minDropF": 0.2,
+    "minDropChroma": 0.15,
+    "knownNoteF": 0.85,
+    "knownDrumF": 0.85
+  }
+}

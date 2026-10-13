@@ -1,0 +1,114 @@
+# 12 October 2026, 11:45 CEST: reproduce a plate shot (3D render or footage) as a colour animatic slot.
+# The plate's content stays a slot for Matthieu's own footage; what is reproduced is its low-resolution colour
+# grid per frame (grade, light, mass motion). Fidelity is judged at that resolution (the content above it is
+# replaced by design): colour error in CIEDE2000 per cell, as a JND score, and SSIM of the low-pass frames.
+# Run: python -I Scripts/ReproducePlate.py --slug onekey-pro-2 --start 6.283 --end 7.45 --motion <workshop>/motions/<id>
+from __future__ import annotations
+
+import argparse
+import json
+import sys
+from pathlib import Path
+
+import numpy as np
+from skimage.color import deltaE_ciede2000, rgb2lab
+
+ENGINE = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(ENGINE))
+from zrmd import settings, versions  # noqa: E402
+from zrmd.analyze.field import colour_grid  # noqa: E402
+from zrmd.emit import hyperframes as hf  # noqa: E402
+from zrmd.media import read_frames  # noqa: E402
+from zrmd.render import lint, render  # noqa: E402
+
+
+def grid_score(ref: str, out: str, start: float, duration: float, cols: int, rows: int, jnd_de: float = 2.3) -> dict:
+    a = read_frames(ref, cols, rows, start=start, duration=duration).astype(np.float32) / 255
+    b = read_frames(out, cols, rows, start=0, duration=duration).astype(np.float32) / 255
+    n = min(len(a), len(b))
+    de = deltaE_ciede2000(rgb2lab(a[:n]), rgb2lab(b[:n]))
+    med = float(np.median(de))
+    return {"score": round(0.99 ** ((med / jnd_de) ** 2), 4), "dE2000_median": round(med, 3),
+            "dE2000_p95": round(float(np.percentile(de, 95)), 3), "frames": n, "jnd_dE": jnd_de}
+
+
+def overlay_scores(ref: str, out: str, start: float, end: float, layers: list[dict]) -> list[dict]:
+    """Each overlay line, in its measured box: light map (JND 2 percent) and x-height (JND 2 percent)."""
+    from zrmd.analyze import typography as ty
+    from zrmd.analyze.overlays import tophat_ink
+    from zrmd.reproduce.overlay import light_rows
+    ra = read_frames(ref, 1920, 1080, gray=True, start=start, duration=end - start)
+    rb = read_frames(out, 1920, 1080, gray=True, start=0, duration=end - start)
+    n = min(len(ra), len(rb))
+    res = []
+    for L in layers:
+        box = L["measured"]["box"]
+        x, y, w, h = box
+        lit = int(np.argmax([float(tophat_ink(f[y:y + h, x:x + w]).sum()) for f in ra[:n]]))
+        act = L["measured"]["active"]
+        active = (int(round((act[0] - start) * 60)), int(round((act[1] - start) * 60)))
+        # One mask for both: the reference caption's ink, so the same pixels are compared.
+        th = tophat_ink(ra[lit][y:y + h, x:x + w]).astype(np.float32)
+        mask = th > 0.35 * th.max()
+        thb = tophat_ink(rb[lit][y:y + h, x:x + w]).astype(np.float32)
+        mask_b = thb > 0.35 * max(thb.max(), 1e-6)
+        a_rel, _ = light_rows(ra[:n], box, mask=mask, active=active)
+        b_rel, _ = light_rows(rb[:n], box, mask=mask_b, active=active)
+        err = float(np.mean(np.abs(a_rel - b_rel)))
+        def xh(frames):
+            th = tophat_ink(frames[lit][y:y + h, x:x + w]).astype(np.float32)
+            m = ty.line_metrics(th / max(th.max(), 1e-6))
+            return m["x_height"] if m else None
+        xa, xb = xh(ra), xh(rb)
+        typo = 0.99 ** ((abs(xa - xb) / xa / 0.02) ** 2) if xa and xb else 0.0
+        res.append({"id": L["id"], "light": round(0.99 ** ((err / 0.02) ** 2), 4), "light_err": round(err, 4),
+                    "typography": round(typo, 4), "x_height": [xa, xb]})
+    return res
+
+
+def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--slug", required=True); ap.add_argument("--start", type=float, required=True)
+    ap.add_argument("--end", type=float, required=True); ap.add_argument("--motion", required=True)
+    ap.add_argument("--cols", type=int, default=16); ap.add_argument("--rows", type=int, default=9)
+    ap.add_argument("--title", default="Plate colour animatic")
+    ap.add_argument("--overlays", action="store_true", help="also rebuild caption overlays found on the plate")
+    a = ap.parse_args()
+    meta = json.loads((settings.path("workshop") / "references" / a.slug / "reference.json").read_text(encoding="utf-8"))
+    video = str(settings.path("refcache") / a.slug / meta["file_name"])
+    data = colour_grid(video, a.start, a.end, a.cols, a.rows)
+    frames = int(round((a.end - a.start) * 60))
+    params = {"schema": "zrmd/motion@1", "canvas": {"width": 1920, "height": 1080, "fps": 60, "frames": frames}, "fonts": [],
+              "layers": [{"id": "bg", "type": "solid", "color": "#000000", "z": 0},
+                         {"id": "plate", "type": "grid", "z": 1, "data": data, "controls": {}, "slot": {"kind": "footage", "note": "drop your own footage or render here"}}]}
+    overlays = []
+    if a.overlays:
+        from zrmd.reproduce.overlay import build_layers
+        font = str(ENGINE / "datasets" / "fonts" / "files" / "Lexend" / "Lexend[wght].ttf")
+        overlays = build_layers(video, a.start, a.end, font)
+        if overlays:
+            params["fonts"].append({"family": "ZrCaption", "file": font})
+            params["layers"] += overlays
+    motion = Path(a.motion)
+    vdir = versions.create_version(motion, params, note=f"colour animatic {a.cols}x{a.rows}" + (f" + {len(overlays)} caption overlays" if overlays else ""))
+    m = versions.read_json(motion / "motion.json", {}) or {}
+    m.update({"id": motion.name, "title": a.title, "recipe": "plate", "source": {"slug": a.slug, "start": a.start, "end": a.end},
+              "tags": ["plate", "slot", "grade", a.slug]})
+    versions.write_json(motion / "motion.json", m)
+    project = hf.cook(params, vdir)
+    ok = json.loads(lint(project)).get("ok")
+    out = render(project, vdir / "render.mp4")
+    score = grid_score(video, str(out), a.start, a.end - a.start, a.cols, a.rows)
+    rep = {"score": score["score"], "dimensions": {"grade": score["score"]}, "grade_detail": score, "lint_ok": ok}
+    if overlays:
+        rep["overlays"] = overlay_scores(video, str(out), a.start, a.end, overlays)
+        if rep["overlays"]:
+            rep["dimensions"]["overlay_light"] = round(min(o["light"] for o in rep["overlays"]), 4)
+            rep["dimensions"]["overlay_typography"] = round(min(o["typography"] for o in rep["overlays"]), 4)
+            rep["score"] = min(rep["dimensions"].values())
+    (vdir / "fidelity.json").write_text(json.dumps(rep, indent=1) + "\n", encoding="utf-8")
+    print(json.dumps({"version": vdir.name, **rep}))
+
+
+if __name__ == "__main__":
+    main()

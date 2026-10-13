@@ -1,0 +1,59 @@
+# 12 October 2026 (A4): stepped_glitch, a sample-and-hold glitch: a step clock at step_hz opens up to 16 steps, each
+# step on or off from a fixed R1 pattern against a learnable density, each held at its own pitch (a fixed R1 pattern
+# scaled by pitch_spread_st around f0) on a pulse-like tone mixed with noise. The gate edges are sigmoids, the count is
+# continuous, so every parameter keeps a gradient. Gap measured by the A3 calibration: glitch envelope error 2.9 JND.
+# Parameter categories: timing (onset_s, step_hz, count, density, duty, edge_ms), timbre (f0_hz, pitch_spread_st,
+# noise_db, buzz), level (amp_db). Derived from the mathematics, no code copied.
+# FR : glitch par échantillonnage-blocage, pas à pas, hauteur tenue par pas, porte à bords doux.
+import math
+
+import torch
+
+from zrmd.audio import sfxdsp as D
+from zrmd.audio.bank import Block, db_to_amp
+
+K, SALT_ON, SALT_P, H = 16, 0.41, 0.13, 12
+META = D.meta("glitch", "Stepped glitch: sample and hold steps on a clock, each step on or off by density and held at its own pitch, a buzzy tone plus noise.",
+              ["glitch", "stutter", "sample-hold", "digital", "error", "data", "step"], "step gate times held pitch (R1 patterns), additive buzz plus noise")
+
+
+class SteppedGlitch(Block):
+    ID = "stepped_glitch"
+    FIT = {"screenBlurMs": 15.0, "blurStartMs": 20.0, "blurEndMs": 2.0, "screenSamples": 768,
+           "scanGroups": [["onset_s", "step_hz", "count", "density"], "*"],
+           "scanPairs": [["step_hz", "onset_s"], ["f0_hz", "pitch_spread_st"]]}
+    PARAMS = [
+        D.param("step_hz", "steps/s", 4, 80, 24, "log", "step clock"),
+        D.param("count", "steps", 1, 16, 10, "lin", "number of steps (continuous)"),
+        D.param("density", "fraction", 0.05, 1.0, 0.7, "lin", "share of steps that sound"),
+        D.param("duty", "fraction", 0.1, 1.0, 0.7, "lin", "open part of each sounding step"),
+        D.param("edge_ms", "ms", 0.2, 8, 1.0, "log", "smoothness of the step edges"),
+        D.param("f0_hz", "Hz", 60, 4000, 600, "log", "centre pitch of the held steps"),
+        D.param("pitch_spread_st", "semitones", 0, 36, 12, "lin", "pitch range of the held steps (fixed pattern)"),
+        D.param("buzz", "0..1", 0.0, 1.0, 0.6, "lin", "harmonic richness (0 sine, 1 square-like)"),
+        D.param("noise_db", "dB", -50, 6, -12, "lin", "noise level relative to the tone"),
+        D.AMP(-14.0), D.ONSET(0.2, 0.02),
+    ]
+
+    def synth(self, v, t, sr):
+        dev = t.device
+        i = torch.arange(K, device=dev, dtype=torch.float32)
+        st = 1.0 / v["step_hz"]
+        start = v["onset_s"] + i * st
+        on = torch.sigmoid(12.0 * (v["density"] - D.pattern(K, SALT_ON, dev))) * D.soft_count(v["count"], K, dev)
+        edge = v["edge_ms"] / 1000.0
+        g = (on[:, None] * torch.sigmoid((t[None, :] - start[:, None]) / edge) * torch.sigmoid((start[:, None] + v["duty"] * st - t[None, :]) / edge)).sum(0)
+        semis = v["pitch_spread_st"] * (D.pattern(K, SALT_P, dev) - 0.5)
+        f = v["f0_hz"] * torch.pow(2.0, D.soft_steps(t, v["onset_s"], st, [semis[k] for k in range(K)], edge) / 12.0)
+        ph = D.phase_from_freq(f, sr)
+        k = torch.arange(1, H + 1, device=dev, dtype=torch.float32)
+        amps = torch.where(k % 2 == 1, 1.0 / k, torch.zeros_like(k)) * torch.pow(v["buzz"] + 1e-3, (k - 1.0) / (H - 1.0) * 3.0)
+        amps = torch.where(k == 1, torch.ones_like(k), amps)
+        nyq = (f[None, :] * k[:, None] < 0.45 * sr).float()
+        tone = (amps[:, None] * nyq * torch.sin(k[:, None] * ph[None, :])).sum(0)
+        tone = D.rms_norm(tone)
+        noise = self.noise(t.shape[0], dev)
+        return db_to_amp(v["amp_db"]) * g * (tone + db_to_amp(v["noise_db"]) * noise) / (1.0 + db_to_amp(v["noise_db"]))
+
+
+BLOCK = SteppedGlitch

@@ -1,0 +1,555 @@
+#!/usr/bin/env python3
+# 12 October 2026: calibration of the differentiable sound bank on a CC0 corpus (task A3).
+# Three steps, each one rerunnable:
+#   prepare : decode every CC0 file of <calibrate.dir>/raw (Kenney packs, CC0 1.0), mono, 48 kHz, leading silence trimmed
+#             to audio.preRollSeconds, cut to calibrate.maxSeconds, peak at calibrate.peakDb, classified by the B1 rule
+#             tree (describe + extra + classify, the same 18 classes as zrmd/audio). Writes prepared/*.wav and
+#             manifest.json (source URL, licence, licence file, sha256, class, why) in the refcache, never in the workshop.
+#   targets : cuts the four OneKey event windows of V_017 (E001, E005, E006, E007) from the demucs stem each event was
+#             detected on, for analysis only, into calibrate.targetsDir (refcache, never archived, never published).
+#   fit     : picks a stratified subset (calibrate.perClass per class, filled to calibrate.maxSounds), fits every sound
+#             with every single bank block, then the best single paired with the calibrate.pairsFromBest next blocks
+#             (warm start). Fits are cached in fits.jsonl keyed by sound, chain and the sha256 of each block.py and of
+#             the fit settings, so a rerun after A1 or A2 adds blocks only fits the new chains.
+#             Writes calibration-report.json and prints the per-class table (score distribution, best chain, classes
+#             under calibrate.passScore, which become the list of missing blocks).
+# --check proves the report logic both ways: a synthetic bank-rendered target must pass and pure noise fitted by a
+# sine-only bank must fail (exit 0 when both directions behave, 1 otherwise); check --sabotage must exit 1.
+# Usage: python -I Scripts/CalibrateSoundBank.py prepare|targets|fit|report|check [--max N] [--blocks a,b] [--markdown]
+#        fit --targets-only (OneKey windows only), report --lines A:B (rebuild from a fits.jsonl slice), --out name.json
+# FR : calibration de la banque sur un corpus CC0 ; préparation, cibles OneKey, ajustement incrémental, tableau par classe.
+from __future__ import annotations
+
+import argparse
+import hashlib
+import json
+import math
+import os
+import sys
+import time
+from concurrent.futures import ProcessPoolExecutor, as_completed
+from pathlib import Path
+
+os.environ.setdefault("OMP_NUM_THREADS", "1")
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+import numpy as np  # noqa: E402
+
+from zrmd.audio import bank, config  # noqa: E402
+
+# Source pages and archives of the CC0 packs (licence read from each pack's License.txt, 12 October 2026).
+PACKS = {
+    "kenney_interface-sounds": "https://kenney.nl/media/pages/assets/interface-sounds/fa43c1dd4d-1677589452/kenney_interface-sounds.zip",
+    "kenney_impact-sounds": "https://kenney.nl/media/pages/assets/impact-sounds/87b4ddecda-1677589768/kenney_impact-sounds.zip",
+    "kenney_ui-audio": "https://kenney.nl/media/pages/assets/ui-audio/490d233f68-1677590494/kenney_ui-audio.zip",
+    "kenney_digital-audio": "https://kenney.nl/media/pages/assets/digital-audio/216eac4753-1677590265/kenney_digital-audio.zip",
+    "kenney_sci-fi-sounds": "https://kenney.nl/media/pages/assets/sci-fi-sounds/6b296f9ecf-1677589334/kenney_sci-fi-sounds.zip",
+    "kenney_rpg-audio": "https://kenney.nl/media/pages/assets/rpg-audio/8e99002d76-1677590336/kenney_rpg-audio.zip",
+    "kenney_casino-audio": "https://kenney.nl/media/pages/assets/casino-audio/2472606a04-1721639069/kenney_casino-audio.zip",
+}
+ONEKEY_EVENTS = ("E001", "E005", "E006", "E007")
+
+
+def cal() -> dict:
+    return config.cfg()["calibrate"]
+
+
+def sha256(path: Path) -> str:
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def to48k(x: np.ndarray, sr: int) -> np.ndarray:
+    from scipy.signal import resample_poly
+    target = config.get("audio.sampleRate")
+    if sr == target:
+        return x.astype(np.float64)
+    g = math.gcd(int(sr), int(target))
+    return resample_poly(x.astype(np.float64), target // g, sr // g)
+
+
+def condition(x: np.ndarray) -> np.ndarray:
+    """Trim the leading silence to audio.preRollSeconds, cut to calibrate.maxSeconds, normalise the peak."""
+    c, sr = cal(), config.get("audio.sampleRate")
+    pk = np.max(np.abs(x)) + 1e-12
+    loud = np.nonzero(np.abs(x) >= pk * 10 ** (-c["trimDb"] / 20.0))[0]
+    a = max(0, int(loud[0]) - int(config.get("audio.preRollSeconds") * sr)) if loud.size else 0
+    b = min(len(x), int(loud[-1]) + int(config.get("audio.tailSeconds") * sr)) if loud.size else len(x)
+    y = x[a:b][: int(c["maxSeconds"] * sr)]
+    if len(y) < int(c["minSeconds"] * sr):
+        y = np.pad(y, (0, int(c["minSeconds"] * sr) - len(y)))
+    return y * (10 ** (c["peakDb"] / 20.0) / (np.max(np.abs(y)) + 1e-12))
+
+
+def classify_x(x: np.ndarray) -> dict:
+    from zrmd.audio import classify, describe as D
+    d = D.describe(x)
+    ext = D.extra(x, d)
+    c = classify.classify(d, ext)
+    return {"class": c["kind"], "why": c["why"], "spanS": round(float(d["spanS"]), 4), "peakHz": round(float(d["peakHz"]), 1),
+            "tonalProminenceDb": round(float(d["prominenceDb"]), 2)}
+
+
+def _prepare_one(job: dict) -> dict:
+    import soundfile as sf
+    src = Path(job["src"])
+    x, sr = sf.read(str(src), always_2d=True)
+    y = condition(to48k(x.mean(axis=1), sr))
+    out = Path(job["out"])
+    sf.write(str(out), y.astype(np.float32), config.get("audio.sampleRate"), subtype="FLOAT")
+    try:
+        cls = classify_x(y)
+    except Exception as exc:  # a degenerate file is kept visible in the manifest instead of dropped
+        cls = {"class": None, "why": [f"{type(exc).__name__}: {exc}"]}
+    return {"id": out.stem, "pack": job["pack"], "file": src.name, "sourceUrl": PACKS[job["pack"]], "licence": "CC0 1.0",
+            "licenceFile": str(Path(job["packDir"]) / "License.txt"),
+            "sha256Source": sha256(src), "prepared": str(out), "seconds": round(len(y) / config.get("audio.sampleRate"), 4), **cls}
+
+
+def prepare() -> int:
+    c = cal()
+    root = Path(c["dir"])
+    outd = root / "prepared"
+    outd.mkdir(parents=True, exist_ok=True)
+    jobs = []
+    for pack in PACKS:
+        pd = root / "raw" / pack
+        lic = (pd / "License.txt").read_text(encoding="utf-8", errors="replace")
+        if "CC0" not in lic:
+            raise SystemExit(f"{pack}: License.txt does not say CC0, refusing it")
+        for f in sorted(pd.rglob("*.ogg")):
+            jobs.append({"src": str(f), "pack": pack, "packDir": str(pd), "out": str(outd / f"{pack.replace('kenney_', '')}__{f.stem}.wav")})
+    items = []
+    with ProcessPoolExecutor(max_workers=c["workers"]) as ex:
+        for r in ex.map(_prepare_one, jobs, chunksize=4):
+            items.append(r)
+    items.sort(key=lambda r: r["id"])
+    counts = {}
+    for r in items:
+        counts[r["class"]] = counts.get(r["class"], 0) + 1
+    man = {"date": "12 October 2026", "note": "CC0 calibration corpus of the sound bank (task A3). Never archived, never published.",
+           "count": len(items), "classCounts": dict(sorted(counts.items(), key=lambda kv: -kv[1])), "packs": PACKS, "sounds": items}
+    (root / "manifest.json").write_text(json.dumps(man, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+    print(json.dumps({"count": len(items), "classCounts": man["classCounts"]}, indent=1))
+    return 0
+
+
+def targets() -> int:
+    import soundfile as sf
+    c = cal()
+    ev = json.loads(Path(c["eventsJson"]).read_text(encoding="utf-8"))["events"]
+    outd = Path(c["targetsDir"])
+    outd.mkdir(parents=True, exist_ok=True)
+    stems, items = {}, []
+    for e in ev:
+        if e["id"] not in ONEKEY_EVENTS:
+            continue
+        y = None
+        for s in e["stem"].split("+"):
+            if s not in stems:
+                x, sr = sf.read(str(Path(c["stemsDir"]) / f"{s}.wav"), always_2d=True)
+                stems[s] = to48k(x.mean(axis=1), sr)
+            y = stems[s] if y is None else y + stems[s]
+        sr48 = config.get("audio.sampleRate")
+        w = y[int(e["windowStart"] * sr48):int(e["windowEnd"] * sr48)]
+        p = outd / f"{e['id']}.wav"
+        sf.write(str(p), w.astype(np.float32), sr48, subtype="FLOAT")
+        items.append({"id": e["id"], "stem": e["stem"], "windowStart": e["windowStart"], "windowEnd": e["windowEnd"],
+                      "b1Class": e["kind"], "path": str(p), "levelDb": e["levelDb"], **classify_x(w)})
+    (outd / "manifest.json").write_text(json.dumps({"date": "12 October 2026", "note": "OneKey event windows for analysis only. "
+                                                    "Never archived, never published, never used as a deliverable.", "targets": items},
+                                                   indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+    print(json.dumps(items, indent=1))
+    return 0
+
+
+# ---- fitting -------------------------------------------------------------------------------------------------------
+
+def block_hash(bid: str) -> str:
+    return hashlib.sha256((bank.bank_dir() / bid / "block.py").read_bytes()).hexdigest()[:16]
+
+
+def base_cfg() -> dict:
+    """13 October 2026: global config with dfit and ploss replaced by calibrate.pinned when present, so the calibration
+    fits and their cache key no longer follow edits to the global sections. FR : config figee pour la calibration."""
+    import copy
+    cf = copy.deepcopy(config.cfg())
+    for k, v in (cal().get("pinned") or {}).items():
+        cf[k] = copy.deepcopy(v)
+    return cf
+
+
+def settings_hash(stage: str = "full") -> str:
+    cf = base_cfg()
+    # 12 October 2026: the metric (official or stochastic) is part of the key; a screen fit depends on the screen
+    # settings only, so changing calibrate.dfitOverrides keeps the screen cache. FR : cle de cache par etape.
+    over = {"so": cal()["screenOverrides"]} if stage == "screen" else {"o": cal()["dfitOverrides"]}
+    blob = json.dumps({**over, "d": cf["dfit"], "p": cf["ploss"], "m": cal().get("metric", "official")}, sort_keys=True)
+    return hashlib.sha256(blob.encode()).hexdigest()[:16]
+
+
+def job_key(sound_id: str, chain_ids: list[str], warm, hashes: dict, sh: str, stage: str = "full") -> str:
+    # 12 October 2026: a full fit with warm None or a dict for the first block keeps the run 1 key (cache reuse);
+    # other stages and per-position warm lists add the stage name to the key.
+    d = {"s": sound_id, "c": chain_ids, "h": [hashes[b] for b in chain_ids], "w": warm, "set": sh if isinstance(sh, str) else sh[stage == "screen"]}
+    if stage != "full":
+        d["stage"] = stage
+    return hashlib.sha256(json.dumps(d, sort_keys=True).encode()).hexdigest()[:20]
+
+
+def metric_cfg(name: str | None = None) -> dict:
+    """12 October 2026: config with ploss.stochastic switched on when calibrate.metric is "stochastic" (the seed-invariant
+    variant, see zrmd/audio/ploss.stochastic), else the official config. FR : config de la metrique choisie."""
+    cf = base_cfg()  # 13 October 2026: pinned dfit and ploss
+    cf["ploss"]["stochastic"]["enabled"] = (name or cal().get("metric", "official")) == "stochastic"
+    return cf
+
+
+def _fit_one(job: dict) -> dict:
+    import soundfile as sf
+    import torch
+    torch.set_num_threads(1)
+    from zrmd.audio import dfit
+    x, _ = sf.read(job["path"], dtype="float32")
+    cfgall = config.cfg()
+    seed = cfgall["bank"]["noiseSeedDefault"]
+    chain = {"sr": cfgall["bank"]["sampleRate"], "blocks": []}
+    warm = job.get("warm")
+    warm = warm if isinstance(warm, list) else [warm]  # 12 October 2026: one start dict per chain position
+    for i, b in enumerate(job["chain"]):
+        params = (warm[i] if i < len(warm) else None) or {}
+        chain["blocks"].append({"block": b, "params": dict(params), "gainDb": 0.0, "offsetS": 0.0, "seed": seed})
+    t = time.time()
+    try:
+        over = cal()["screenOverrides"] if job.get("stage") == "screen" else cal()["dfitOverrides"]
+        r = dfit.fit(np.asarray(x, np.float32), chain, device="cpu", overrides=over, cfg=metric_cfg())
+    except Exception as exc:
+        return {**job, "error": f"{type(exc).__name__}: {exc}", "seconds": round(time.time() - t, 1)}
+    from zrmd.audio import ploss
+    ours = r.pop("audio", None)
+    b1 = r.get("b1") or {}
+    # 12 October 2026: the official ploss score of the same render is kept beside the fitted metric. FR : score officiel.
+    official = round(ploss.score(ours, x, cfgall["bank"]["sampleRate"], metric_cfg("official"))["score"], 4) if ours is not None else None
+    return {**job, "score": r["score"], "official": official, "E": r["E"], "errors": r["errors"], "b1": b1.get("score"),
+            "chainOut": r["chain"], "seconds": r["seconds"], "startsRun": r["startsRun"]}
+
+
+def _run_jobs(jobs: list[dict], cache: dict, cache_path: Path, workers: int) -> None:
+    todo = [j for j in jobs if j["key"] not in cache]
+    print(f"fits: {len(jobs)} wanted, {len(jobs) - len(todo)} cached, {len(todo)} to run", flush=True)
+    if not todo:
+        return
+    t0, done = time.time(), 0
+    with ProcessPoolExecutor(max_workers=workers) as ex, open(cache_path, "a", encoding="utf-8") as fh:
+        futs = [ex.submit(_fit_one, j) for j in todo]
+        for f in as_completed(futs):
+            r = f.result()
+            cache[r["key"]] = r
+            fh.write(json.dumps(r, ensure_ascii=False) + "\n")
+            fh.flush()
+            done += 1
+            if done % 25 == 0 or done == len(todo):
+                print(f"  {done}/{len(todo)} fits, {time.time() - t0:.0f} s", flush=True)
+
+
+def select(sounds: list[dict], per_class: int, max_n: int) -> list[dict]:
+    """Stratified, deterministic: per class, sounds ordered by sha256 of their id; per_class each, then round robin."""
+    by = {}
+    for s in sounds:
+        if s.get("class"):
+            by.setdefault(s["class"], []).append(s)
+    for k in by:
+        by[k].sort(key=lambda s: hashlib.sha256(s["id"].encode()).hexdigest())
+    picked = [s for k in sorted(by) for s in by[k][:per_class]]
+    rest = {k: v[per_class:] for k, v in by.items()}
+    while len(picked) < max_n and any(rest.values()):
+        for k in sorted(rest):
+            if rest[k] and len(picked) < max_n:
+                picked.append(rest[k].pop(0))
+    return picked[:max_n]
+
+
+def best_of(results: list[dict]) -> dict | None:
+    ok = [r for r in results if r.get("score") is not None]
+    return max(ok, key=lambda r: r["score"]) if ok else None
+
+
+def block_kind(bid: str) -> str:
+    meta = json.loads((bank.bank_dir() / bid / "block.json").read_text(encoding="utf-8"))
+    if meta.get("stereo") or meta.get("family") == "stereo":
+        return "stereo"
+    return meta.get("kind", "source")
+
+
+def fit_set(sounds: list[dict], blocks: list[str], cache: dict, cache_path: Path) -> dict:
+    """12 October 2026, four stages, each skipped for a sound already at calibrate.passScore:
+    1 screen: every SOURCE block, random pre-screen only (calibrate.screenOverrides), ranks the blocks per sound;
+    2 full  : the calibrate.fullFromScreen best screened sources get a full dfit;
+    3 pairs : the best full single (warm) layered with the next calibrate.pairsFromBest full sources;
+    4 fx    : the best chain so far (warm) followed by each effect of calibrate.fxTrials present in the bank.
+    Stereo effects are skipped: the calibration corpus is mono."""
+    c = cal()
+    hashes = {b: block_hash(b) for b in blocks}
+    sh = (settings_hash("full"), settings_hash("screen"))
+    kinds = {b: block_kind(b) for b in blocks}
+    sources = [b for b in blocks if kinds[b] == "source"]
+    effects = [b for b in c["fxTrials"] if b in blocks and kinds.get(b) == "effect"]
+    per = {s["id"]: [] for s in sounds}
+
+    def mk(s, chain_ids, warm=None, stage="full"):
+        return {"key": job_key(s["id"], chain_ids, warm, hashes, sh, stage), "sound": s["id"], "path": s["path"],
+                "chain": chain_ids, "warm": warm, "stage": stage}
+
+    def best(sid):
+        return best_of(per[sid])
+
+    def open_sounds():
+        return [s for s in sounds if not (best(s["id"]) and best(s["id"])["score"] >= c["passScore"])]
+
+    use_screen = len(sources) > c["fullFromScreen"]
+    screened = {}
+    if use_screen:
+        jobs = [mk(s, [b], stage="screen") for s in sounds for b in sources]
+        _run_jobs(jobs, cache, cache_path, c["workers"])
+        for j in jobs:
+            screened.setdefault(j["sound"], []).append(cache[j["key"]])
+    full = []
+    for s in sounds:
+        if use_screen:
+            rs = sorted([r for r in screened[s["id"]] if r.get("score") is not None], key=lambda r: -r["score"])
+            pick = [r["chain"][0] for r in rs[: c["fullFromScreen"]]]
+        else:
+            pick = sources
+        full += [mk(s, [b]) for b in pick]
+    _run_jobs(full, cache, cache_path, c["workers"])
+    for j in full:
+        per[j["sound"]].append(cache[j["key"]])
+    if c["maxChainBlocks"] >= 2 and len(sources) >= 2:
+        pairs = []
+        for s in open_sounds():
+            rs = sorted([r for r in per[s["id"]] if r.get("score") is not None and len(r["chain"]) == 1], key=lambda r: -r["score"])
+            if not rs:
+                continue
+            top = rs[0]
+            warm = top["chainOut"]["blocks"][0]["params"]
+            pairs += [mk(s, [top["chain"][0], r["chain"][0]], warm) for r in rs[1:1 + c["pairsFromBest"]]]
+        _run_jobs(pairs, cache, cache_path, c["workers"])
+        for j in pairs:
+            per[j["sound"]].append(cache[j["key"]])
+    if effects:
+        fx = []
+        for s in open_sounds():
+            b = best(s["id"])
+            if not b or len(b["chain"]) + 1 > c["maxChainBlocks"] + 1:
+                continue
+            warm = [blk["params"] for blk in b["chainOut"]["blocks"]] + [None]
+            fx += [mk(s, b["chain"] + [e], warm, stage="fx") for e in effects]
+        _run_jobs(fx, cache, cache_path, c["workers"])
+        for j in fx:
+            per[j["sound"]].append(cache[j["key"]])
+    return per
+
+
+def _ceiling_one(row: dict) -> float | None:
+    """12 October 2026: seed ceiling of a best chain: the chain rendered with every noise seed moved by one, scored
+    against its own render under the fitted metric. A perfect model of the sound cannot beat this number, so a gap
+    between the fit score and 99 that the ceiling shares is a realisation (or metric) limit, not a missing block.
+    FR : plafond de graine, la meilleure note atteignable par cette chaine contre une autre realisation d'elle-meme."""
+    import torch
+    torch.set_num_threads(1)
+    from zrmd.audio import ploss
+    ch = row.get("chainOut")
+    if not ch:
+        return None
+    alt = {**ch, "blocks": [{**b, "seed": int(b.get("seed", 0)) + 1} for b in ch["blocks"]]}
+    try:
+        a, b = bank.render_chain(ch), bank.render_chain(alt)
+    except Exception:  # 12 October 2026: a block edited since the fit (report from cache) may not render its old params
+        return None
+    return round(ploss.score(b, a, ch["sr"], metric_cfg())["score"], 2)
+
+
+def stats(vals: list[float]) -> dict:
+    a = np.asarray(vals, float)
+    return {"n": int(a.size), "median": round(float(np.median(a)), 2), "p10": round(float(np.percentile(a, 10)), 2),
+            "p90": round(float(np.percentile(a, 90)), 2), "max": round(float(a.max()), 2),
+            "pass": int((a >= cal()["passScore"]).sum())} if a.size else {"n": 0}
+
+
+def load_cache(path: Path) -> dict:
+    cache = {}
+    if path.exists():
+        for line in path.read_text(encoding="utf-8").splitlines():
+            if line.strip():
+                r = json.loads(line)
+                cache[r["key"]] = r
+    return cache
+
+
+def corpus_sounds(max_n: int | None) -> list[dict]:
+    c = cal()
+    man = json.loads((Path(c["dir"]) / "manifest.json").read_text(encoding="utf-8"))
+    sounds = [{"id": s["id"], "path": s["prepared"], "class": s["class"], "pack": s["pack"]} for s in man["sounds"]]
+    return select(sounds, c["perClass"], max_n or c["maxSounds"])
+
+
+def onekey_targets() -> list[dict]:
+    tg_man = Path(cal()["targetsDir"]) / "manifest.json"
+    if not tg_man.exists():
+        return []
+    return [{"id": "onekey-" + t["id"], "path": t["path"], "class": t["b1Class"]} for t in json.loads(tg_man.read_text())["targets"]]
+
+
+def fit(max_n: int | None, blocks: list[str] | None, markdown: bool, targets_only: bool = False, out: str | None = None) -> int:
+    """12 October 2026: --targets-only fits the four OneKey windows alone (the corpus part is then empty in the report).
+    FR : --targets-only n'ajuste que les quatre fenetres OneKey."""
+    c = cal()
+    root = Path(c["dir"])
+    chosen = [] if targets_only else corpus_sounds(max_n)
+    blocks = blocks or bank.list_blocks()
+    cache_path = root / "fits.jsonl"
+    cache = load_cache(cache_path)
+    t0 = time.time()
+    per = fit_set(chosen, blocks, cache, cache_path) if chosen else {}
+    tg = onekey_targets()
+    per_tg = fit_set(tg, blocks, cache, cache_path) if tg else {}
+    return write_report(chosen, per, tg, per_tg, blocks, t0, markdown, out, note="targets only" if targets_only else "fit")
+
+
+def report_from_cache(lines: str, max_n: int | None, markdown: bool, out: str | None) -> int:
+    """12 October 2026: rebuilds a report from a slice A:B (0-based line numbers, B excluded) of fits.jsonl, for a run
+    whose cache keys no longer match the shared config (other tasks edit dfit and ploss, which re-keys every fit).
+    Every chain fitted in the slice counts; the best per sound is kept, exactly as fit_set does.
+    FR : rapport reconstruit depuis une tranche de fits.jsonl quand la config partagee a change les cles du cache."""
+    c = cal()
+    root = Path(c["dir"])
+    a, b = (int(v) for v in lines.split(":"))
+    rows = [json.loads(l) for l in (root / "fits.jsonl").read_text(encoding="utf-8").splitlines()[a:b] if l.strip()]
+    chosen = corpus_sounds(max_n)
+    tg = onekey_targets()
+    per, per_tg = {s["id"]: [] for s in chosen}, {t["id"]: [] for t in tg}
+    blocks = set()
+    for r in rows:
+        for d in (per, per_tg):
+            if r.get("sound") in d:
+                d[r["sound"]].append(r)
+        blocks.update(r.get("chain") or [])
+    if not any(per.values()):
+        raise SystemExit(f"report: no fitted row of the chosen corpus in lines {lines}")
+    per_tg = {k: v for k, v in per_tg.items() if v}
+    tg = [t for t in tg if t["id"] in per_tg]
+    return write_report(chosen, per, tg, per_tg, sorted(blocks), time.time(), markdown, out, note=f"from cache lines {lines}")
+
+
+def write_report(chosen, per, tg, per_tg, blocks, t0, markdown, out, note) -> int:
+    c = cal()
+    root = Path(c["dir"])
+    onekey = []
+    if tg:
+        for t in tg:
+            b = best_of(per_tg[t["id"]])
+            onekey.append({"id": t["id"], "class": t["class"], "score": b and b["score"], "official": b and b.get("official"), "b1": b and b["b1"],
+                           "chain": b and b["chain"], "errors": b and b["errors"], "chainOut": b and b["chainOut"]})
+    rows, by_class = [], {}
+    for s in chosen:
+        b = best_of(per.get(s["id"], []))
+        if not b:
+            continue
+        rows.append({"id": s["id"], "class": s["class"], "score": b["score"], "official": b.get("official"), "b1": b["b1"],
+                     "chain": b["chain"], "errors": b["errors"], "chainOut": b["chainOut"]})
+        by_class.setdefault(s["class"], []).append(rows[-1])
+    with ProcessPoolExecutor(max_workers=c["workers"]) as ex:
+        for r, ceil in zip(rows + onekey, ex.map(_ceiling_one, rows + onekey, chunksize=4)):
+            r["seedCeiling"] = ceil
+    table = []
+    for k in sorted(by_class, key=lambda k: -len(by_class[k])):
+        rs = by_class[k]
+        chains = {}
+        for r in rs:
+            chains["+".join(r["chain"])] = chains.get("+".join(r["chain"]), 0) + 1
+        terms = {t: round(float(np.median([r["errors"][t] for r in rs if r["errors"]])), 2) for t in rs[0]["errors"]}
+        ceil = [r["seedCeiling"] for r in rs if r.get("seedCeiling") is not None]
+        offi = [r["official"] for r in rs if r.get("official") is not None]
+        table.append({"class": k, **stats([r["score"] for r in rs]), "b1Median": round(float(np.median([r["b1"] for r in rs if r["b1"] is not None] or [0])), 2),
+                      "officialMedian": round(float(np.median(offi)), 2) if offi else None,
+                      "seedCeilingMedian": round(float(np.median(ceil)), 2) if ceil else None,
+                      "ceilingUnderPass": int(sum(v < c["passScore"] for v in ceil)),
+                      "bestChains": dict(sorted(chains.items(), key=lambda kv: -kv[1])), "medianErrors": terms})
+    under = [t["class"] for t in table if t["median"] < c["passScore"]]
+    rep = {"date": "12 October 2026", "note": note, "metric": c.get("metric", "official"), "blocks": blocks, "blockHashes": {b: block_hash(b) for b in blocks if (bank.bank_dir() / b / "block.py").exists()}, "settingsHash": settings_hash(), "screenSettingsHash": settings_hash("screen"),
+           "sounds": len(rows), "overall": stats([r["score"] for r in rows]) if rows else {"n": 0}, "perClass": table, "classesUnderPass": under,
+           "onekey": onekey, "seconds": round(time.time() - t0, 1), "perSound": rows}
+    (root / (out or "calibration-report.json")).write_text(json.dumps(rep, indent=1, ensure_ascii=False) + "\n", encoding="utf-8")
+    hist = root / "calibration-history.jsonl"
+    with open(hist, "a", encoding="utf-8") as fh:
+        fh.write(json.dumps({k: rep[k] for k in ("date", "note", "metric", "blocks", "sounds", "overall", "classesUnderPass")} |
+                            {"perClass": [{k: t[k] for k in ("class", "n", "median", "p10", "max", "pass", "officialMedian", "seedCeilingMedian")} for t in table],
+                             "onekey": [{k: o[k] for k in ("id", "score", "b1", "chain")} for o in onekey], "at": time.strftime("%H:%M")}) + "\n")
+    print(json.dumps({k: rep[k] for k in ("blocks", "sounds", "overall", "classesUnderPass", "seconds")}, indent=1))
+    if markdown:
+        print(markdown_table(rep))
+    return 0
+
+
+def markdown_table(rep: dict) -> str:
+    lines = ["| Class | Sounds | Median | P10 | P90 | Max | At or above 99 | Official median | B1 median | Seed ceiling median | Best chains |",
+             "|---|---|---|---|---|---|---|---|---|---|---|"]
+    for t in rep["perClass"]:
+        ch = ", ".join(f"{k} ({v})" for k, v in list(t["bestChains"].items())[:3])
+        lines.append(f"| {t['class']} | {t['n']} | {t['median']} | {t['p10']} | {t['p90']} | {t['max']} | {t['pass']} | "
+                     f"{t.get('officialMedian')} | {t['b1Median']} | {t.get('seedCeilingMedian')} | {ch} |")
+    o = rep["overall"]
+    if o.get("n"):
+        lines.append(f"| all | {o['n']} | {o['median']} | {o['p10']} | {o['p90']} | {o['max']} | {o['pass']} | | | | |")
+    if rep["onekey"]:
+        lines += ["", "| OneKey target | B1 class | Score | Official | B1 score | Seed ceiling | Best chain |", "|---|---|---|---|---|---|---|"]
+        for t in rep["onekey"]:
+            lines.append(f"| {t['id']} | {t['class']} | {t['score']} | {t.get('official')} | {t['b1']} | {t.get('seedCeiling')} | {'+'.join(t['chain'] or [])} |")
+    return "\n".join(lines)
+
+
+def check(sabotage: bool = False) -> int:
+    """Both directions of the calibration verdict on two synthetic sounds in the scratch area of the refcache.
+    --sabotage (12 October 2026) fits the good sine with the wrong block (filtered noise), so the check must exit 1."""
+    import soundfile as sf
+    c = cal()
+    d = Path(c["dir"]) / "check"
+    d.mkdir(parents=True, exist_ok=True)
+    sr = config.get("bank.sampleRate")
+    good = bank.render_block("sine_env", {}, 0.5, sr)
+    rng = np.random.RandomState(5)
+    bad = (rng.randn(int(0.5 * sr)) * np.exp(-np.linspace(0, 6, int(0.5 * sr)))).astype(np.float32) * 0.5  # broadband noise
+    sf.write(str(d / "good.wav"), good, sr, subtype="FLOAT")
+    sf.write(str(d / "bad.wav"), bad, sr, subtype="FLOAT")
+    cache_path = d / "fits.jsonl"
+    cache_path.unlink(missing_ok=True)
+    per = fit_set([{"id": "check-good", "path": str(d / "good.wav")}, {"id": "check-bad", "path": str(d / "bad.wav")}],
+                  ["filtered_noise_burst" if sabotage else "sine_env"], {}, cache_path)
+    g, b = best_of(per["check-good"])["score"], best_of(per["check-bad"])["score"]
+    ok = g >= c["passScore"] and b < c["passScore"]
+    print(json.dumps({"goodScore": g, "badScore": b, "passScore": c["passScore"], "verdictCorrect": ok}))
+    return 0 if ok else 1
+
+
+def main() -> int:
+    ap = argparse.ArgumentParser()
+    ap.add_argument("step", choices=["prepare", "targets", "fit", "report", "check"])
+    ap.add_argument("--targets-only", action="store_true")
+    ap.add_argument("--lines", help="report: slice A:B of fits.jsonl (0-based, B excluded)")
+    ap.add_argument("--out", help="report file name inside calibrate.dir (default calibration-report.json)")
+    ap.add_argument("--max", type=int)
+    ap.add_argument("--blocks")
+    ap.add_argument("--markdown", action="store_true")
+    ap.add_argument("--sabotage", action="store_true")
+    a = ap.parse_args()
+    if a.step == "prepare":
+        return prepare()
+    if a.step == "targets":
+        return targets()
+    if a.step == "check":
+        return check(a.sabotage)
+    if a.step == "report":
+        return report_from_cache(a.lines, a.max, a.markdown, a.out)
+    return fit(a.max, a.blocks.split(",") if a.blocks else None, a.markdown, a.targets_only, a.out)
+
+
+if __name__ == "__main__":
+    sys.exit(main())

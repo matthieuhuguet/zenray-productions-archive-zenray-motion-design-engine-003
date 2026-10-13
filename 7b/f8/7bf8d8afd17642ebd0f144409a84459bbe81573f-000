@@ -1,0 +1,87 @@
+{
+  "id": "tom_drum",
+  "family": "drum",
+  "description": "Tom: four circular membrane modes with a downward pitch bend plus a stick noise. (12 October 2026)",
+  "tags": [
+    "drum",
+    "tom",
+    "membrane",
+    "modal",
+    "transient"
+  ],
+  "sources": [
+    {
+      "what": "ideal circular membrane modes",
+      "url": null,
+      "licence": "original (derived from the mathematics, no code copied)",
+      "reference": "Bessel function zeros of the circular membrane (Rayleigh, The Theory of Sound, 1877)"
+    }
+  ],
+  "licence": "original",
+  "params": [
+    {
+      "name": "tune_hz",
+      "unit": "Hz",
+      "min": 60.0,
+      "max": 500.0,
+      "default": 140.0,
+      "scale": "log",
+      "description": "fundamental after the bend"
+    },
+    {
+      "name": "decay_s",
+      "unit": "s (T60)",
+      "min": 0.08,
+      "max": 2.0,
+      "default": 0.5,
+      "scale": "log",
+      "description": "fundamental decay"
+    },
+    {
+      "name": "bend_st",
+      "unit": "semitones",
+      "min": 0.0,
+      "max": 12.0,
+      "default": 3.0,
+      "scale": "lin",
+      "description": "pitch above the tune at the hit"
+    },
+    {
+      "name": "bend_s",
+      "unit": "s",
+      "min": 0.005,
+      "max": 0.2,
+      "default": 0.04,
+      "scale": "log",
+      "description": "time constant of the bend"
+    },
+    {
+      "name": "stick_db",
+      "unit": "dB re membrane",
+      "min": -40.0,
+      "max": 0.0,
+      "default": -14.0,
+      "scale": "lin",
+      "description": "stick noise level"
+    },
+    {
+      "name": "amp_db",
+      "unit": "dBFS",
+      "min": -60.0,
+      "max": 0.0,
+      "default": -12.0,
+      "scale": "lin",
+      "description": "peak level of the main layer"
+    },
+    {
+      "name": "onset_s",
+      "unit": "s",
+      "min": 0.0,
+      "max": 0.2,
+      "default": 0.02,
+      "scale": "lin",
+      "description": "start time in the window"
+    }
+  ],
+  "date": "12 October 2026"
+}

@@ -1,0 +1,124 @@
+{
+  "id": "stepped_glitch",
+  "family": "glitch",
+  "description": "Stepped glitch: sample and hold steps on a clock, each step on or off by density and held at its own pitch, a buzzy tone plus noise. (12 October 2026)",
+  "tags": [
+    "glitch",
+    "stutter",
+    "sample-hold",
+    "digital",
+    "error",
+    "data",
+    "step"
+  ],
+  "sources": [
+    {
+      "what": "step gate times held pitch (R1 patterns), additive buzz plus noise",
+      "url": null,
+      "licence": "original (derived from the mathematics, no code copied)"
+    }
+  ],
+  "licence": "original",
+  "params": [
+    {
+      "name": "step_hz",
+      "unit": "steps/s",
+      "min": 4.0,
+      "max": 80.0,
+      "default": 24.0,
+      "scale": "log",
+      "description": "step clock"
+    },
+    {
+      "name": "count",
+      "unit": "steps",
+      "min": 1.0,
+      "max": 16.0,
+      "default": 10.0,
+      "scale": "lin",
+      "description": "number of steps (continuous)"
+    },
+    {
+      "name": "density",
+      "unit": "fraction",
+      "min": 0.05,
+      "max": 1.0,
+      "default": 0.7,
+      "scale": "lin",
+      "description": "share of steps that sound"
+    },
+    {
+      "name": "duty",
+      "unit": "fraction",
+      "min": 0.1,
+      "max": 1.0,
+      "default": 0.7,
+      "scale": "lin",
+      "description": "open part of each sounding step"
+    },
+    {
+      "name": "edge_ms",
+      "unit": "ms",
+      "min": 0.2,
+      "max": 8.0,
+      "default": 1.0,
+      "scale": "log",
+      "description": "smoothness of the step edges"
+    },
+    {
+      "name": "f0_hz",
+      "unit": "Hz",
+      "min": 60.0,
+      "max": 4000.0,
+      "default": 600.0,
+      "scale": "log",
+      "description": "centre pitch of the held steps"
+    },
+    {
+      "name": "pitch_spread_st",
+      "unit": "semitones",
+      "min": 0.0,
+      "max": 36.0,
+      "default": 12.0,
+      "scale": "lin",
+      "description": "pitch range of the held steps (fixed pattern)"
+    },
+    {
+      "name": "buzz",
+      "unit": "0..1",
+      "min": 0.0,
+      "max": 1.0,
+      "default": 0.6,
+      "scale": "lin",
+      "description": "harmonic richness (0 sine, 1 square-like)"
+    },
+    {
+      "name": "noise_db",
+      "unit": "dB",
+      "min": -50.0,
+      "max": 6.0,
+      "default": -12.0,
+      "scale": "lin",
+      "description": "noise level relative to the tone"
+    },
+    {
+      "name": "amp_db",
+      "unit": "dBFS",
+      "min": -60.0,
+      "max": 0.0,
+      "default": -14.0,
+      "scale": "lin",
+      "description": "peak level of the main layer"
+    },
+    {
+      "name": "onset_s",
+      "unit": "s",
+      "min": 0.0,
+      "max": 0.2,
+      "default": 0.02,
+      "scale": "lin",
+      "description": "start time in the window"
+    }
+  ],
+  "date": "12 October 2026"
+}

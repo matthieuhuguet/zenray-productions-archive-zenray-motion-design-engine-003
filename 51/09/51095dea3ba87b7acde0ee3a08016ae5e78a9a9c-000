@@ -1,0 +1,44 @@
+# 12 October 2026: F3 family probe with the marks fitter (blur and per-glyph deltas included), no version written.
+# Usage: F3ProbeFamilies.py --marks id,id --files f1 f2 ... ; prints and writes a JSON table of soft IoU per pair.
+import argparse
+import json
+import sys
+from concurrent.futures import ProcessPoolExecutor
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from zrmd import settings  # noqa: E402
+from zrmd.vector import marks as K  # noqa: E402
+
+
+def one(job):
+    slug, m, f = job
+    try:
+        ref = K.reference_of(slug, m)
+        import numpy as np
+        keep = np.asarray(K.ndi.binary_dilation(ref["keep"], iterations=2), np.float32)
+        p = K.fit_text(m["text"], f, ref["c"], ref["weight"], init_mask=keep)
+        return {"mark": m["id"], "file": f, "iou_soft": round(1 - p["loss"], 5), "axes": p["axes"], "size": p["size"]}
+    except Exception as e:
+        return {"mark": m["id"], "file": f, "error": repr(e)}
+
+
+def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--slug", default="onekey-pro-2")
+    ap.add_argument("--marks", required=True)
+    ap.add_argument("--files", nargs="+", required=True)
+    ap.add_argument("--out", required=True)
+    a = ap.parse_args()
+    inv = {m["id"]: m for m in K.inventory(a.slug)["marks"]}
+    jobs = [(a.slug, inv[i], f) for i in a.marks.split(",") for f in a.files]
+    rows = []
+    with ProcessPoolExecutor(settings.get("vector.marks.workers")) as pool:
+        for r in pool.map(one, jobs):
+            print(json.dumps(r), flush=True)
+            rows.append(r)
+    Path(a.out).write_text(json.dumps(rows, indent=1))
+
+
+if __name__ == "__main__":
+    main()

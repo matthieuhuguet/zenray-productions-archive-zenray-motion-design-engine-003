@@ -1,0 +1,40 @@
+# 12 October 2026: fm_bell, two-operator FM (Chowning 1973): carrier phase plus I(t) sin(modulator phase), with a
+# modulation index that decays faster than the amplitude, as in the classic FM bell. Phases are accumulated.
+# Derived from the published mathematics (J. Chowning, JAES 21(7), 1973), no borrowed code. FR : cloche FM.
+import torch
+
+from zrmd.audio.bank import Block, db_to_amp, envelope, phase_from_freq
+
+META = {
+    "family": "fm",
+    "description": "Two-operator FM with a decaying modulation index (Chowning 1973). Bells, dings, metallic hits. (12 October 2026)",
+    "tags": ["tonal", "fm", "bell", "ding", "metallic", "inharmonic"],
+    "sources": [{"what": "FM synthesis equations", "url": None, "reference": "J. Chowning, The Synthesis of Complex Audio Spectra by Means of Frequency Modulation, JAES 21(7), 1973", "licence": "original (derived from the published mathematics, no code copied)"}],
+    "licence": "original",
+}
+
+
+class FmBell(Block):
+    ID = "fm_bell"
+    PARAMS = [
+        {"name": "carrier_hz", "unit": "Hz", "min": 50.0, "max": 8000.0, "default": 600.0, "scale": "log", "description": "carrier frequency"},
+        {"name": "ratio", "unit": "x carrier", "min": 0.5, "max": 8.0, "default": 1.4, "scale": "log", "description": "modulator to carrier frequency ratio"},
+        {"name": "index", "unit": "rad", "min": 0.0, "max": 12.0, "default": 3.0, "scale": "lin", "description": "peak modulation index"},
+        {"name": "index_decay_s", "unit": "s (T60)", "min": 0.01, "max": 4.0, "default": 0.4, "scale": "log", "description": "time for the index to fall 60 dB"},
+        {"name": "amp_db", "unit": "dBFS", "min": -60.0, "max": 0.0, "default": -12.0, "scale": "lin", "description": "peak amplitude"},
+        {"name": "onset_s", "unit": "s", "min": 0.0, "max": 0.25, "default": 0.02, "scale": "lin", "description": "start time in the window"},
+        {"name": "attack_s", "unit": "s", "min": 0.0005, "max": 0.1, "default": 0.002, "scale": "log", "description": "linear attack"},
+        {"name": "decay_s", "unit": "s (T60)", "min": 0.05, "max": 6.0, "default": 1.5, "scale": "log", "description": "time to fall 60 dB"},
+    ]
+
+    def synth(self, v, t, sr):
+        gate = (t >= v["onset_s"]).float()
+        u = torch.clamp(t - v["onset_s"], min=0.0)
+        carrier = phase_from_freq(v["carrier_hz"] * gate * torch.ones_like(t), sr)
+        modulator = phase_from_freq(v["carrier_hz"] * v["ratio"] * gate * torch.ones_like(t), sr)
+        index = v["index"] * torch.pow(10.0, -3.0 * u / v["index_decay_s"])
+        env = envelope(t, v["onset_s"], v["attack_s"], v["decay_s"])
+        return db_to_amp(v["amp_db"]) * env * torch.sin(carrier + index * torch.sin(modulator))
+
+
+BLOCK = FmBell

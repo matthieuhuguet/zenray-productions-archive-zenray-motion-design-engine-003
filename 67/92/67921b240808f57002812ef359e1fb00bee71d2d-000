@@ -1,0 +1,98 @@
+{
+  "id": "modal_ding",
+  "family": "modal",
+  "kind": "source",
+  "description": "Six decaying modes with stretched ratios k^stretch, spectral tilt and frequency dependent damping. Dings, glass pings, small bells. (12 October 2026)",
+  "tags": [
+    "tonal",
+    "modal",
+    "ding",
+    "inharmonic",
+    "glass",
+    "ui"
+  ],
+  "sources": [
+    {
+      "what": "modal synthesis",
+      "url": null,
+      "reference": "J.-M. Adrien, The missing link: modal synthesis, 1991",
+      "licence": "original (derived from the published mathematics, no code copied)"
+    }
+  ],
+  "licence": "original",
+  "params": [
+    {
+      "name": "f0_hz",
+      "unit": "Hz",
+      "min": 100.0,
+      "max": 8000.0,
+      "default": 880.0,
+      "scale": "log",
+      "description": "lowest mode"
+    },
+    {
+      "name": "stretch",
+      "unit": "exponent",
+      "min": 0.8,
+      "max": 2.2,
+      "default": 1.35,
+      "scale": "lin",
+      "description": "mode k sits at f0 * k**stretch"
+    },
+    {
+      "name": "tilt",
+      "unit": "exponent",
+      "min": 0.0,
+      "max": 3.0,
+      "default": 1.2,
+      "scale": "lin",
+      "description": "mode gain k**-tilt"
+    },
+    {
+      "name": "decay_s",
+      "unit": "s (T60)",
+      "min": 0.05,
+      "max": 6.0,
+      "default": 1.2,
+      "scale": "log",
+      "description": "decay of the lowest mode"
+    },
+    {
+      "name": "damp",
+      "unit": "exponent",
+      "min": 0.0,
+      "max": 2.0,
+      "default": 0.7,
+      "scale": "lin",
+      "description": "mode decay decay_s / k**damp"
+    },
+    {
+      "name": "amp_db",
+      "unit": "dBFS",
+      "min": -60.0,
+      "max": 0.0,
+      "default": -12.0,
+      "scale": "lin",
+      "description": "peak level"
+    },
+    {
+      "name": "onset_s",
+      "unit": "s",
+      "min": 0.0,
+      "max": 0.25,
+      "default": 0.02,
+      "scale": "lin",
+      "description": "start time in the window"
+    },
+    {
+      "name": "attack_s",
+      "unit": "s",
+      "min": 0.0005,
+      "max": 0.05,
+      "default": 0.001,
+      "scale": "log",
+      "description": "linear attack"
+    }
+  ],
+  "date": "12 October 2026"
+}

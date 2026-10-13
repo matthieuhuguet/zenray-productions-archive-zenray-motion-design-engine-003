@@ -1,0 +1,87 @@
+{
+  "id": "ui_tick",
+  "family": "ui",
+  "description": "UI tick: two short sine pings separated by a gap, the second transposed and quieter. (12 October 2026)",
+  "tags": [
+    "ui",
+    "tick",
+    "tock",
+    "ping",
+    "notification",
+    "short"
+  ],
+  "sources": [
+    {
+      "what": "decaying sines",
+      "url": null,
+      "licence": "original (derived from the mathematics, no code copied)"
+    }
+  ],
+  "licence": "original",
+  "params": [
+    {
+      "name": "tone_hz",
+      "unit": "Hz",
+      "min": 600.0,
+      "max": 9000.0,
+      "default": 2500.0,
+      "scale": "log",
+      "description": "pitch of the first ping"
+    },
+    {
+      "name": "ratio2",
+      "unit": "x tone",
+      "min": 0.5,
+      "max": 2.0,
+      "default": 0.75,
+      "scale": "log",
+      "description": "pitch of the second ping over the first"
+    },
+    {
+      "name": "gap_s",
+      "unit": "s",
+      "min": 0.01,
+      "max": 0.25,
+      "default": 0.06,
+      "scale": "log",
+      "description": "time between the pings"
+    },
+    {
+      "name": "second_db",
+      "unit": "dB re first",
+      "min": -30.0,
+      "max": 0.0,
+      "default": -4.0,
+      "scale": "lin",
+      "description": "second ping level"
+    },
+    {
+      "name": "decay_s",
+      "unit": "s (T60)",
+      "min": 0.002,
+      "max": 0.08,
+      "default": 0.02,
+      "scale": "log",
+      "description": "time to fall 60 dB"
+    },
+    {
+      "name": "amp_db",
+      "unit": "dBFS",
+      "min": -60.0,
+      "max": 0.0,
+      "default": -14.0,
+      "scale": "lin",
+      "description": "peak level of the main layer"
+    },
+    {
+      "name": "onset_s",
+      "unit": "s",
+      "min": 0.0,
+      "max": 0.2,
+      "default": 0.02,
+      "scale": "lin",
+      "description": "start time in the window"
+    }
+  ],
+  "date": "12 October 2026"
+}

@@ -1,0 +1,40 @@
+# 12 October 2026: ui_blip_tri, a band-limited triangle (odd harmonics 1, 3, 5, 7, 9 at alternating 1/k**2) whose
+# pitch falls by drop_st semitones with time constant drop_s. Clicks, taps, toggles, game blips. FR : bip triangle.
+import math
+
+import torch
+
+from zrmd.audio.bank import Block, db_to_amp, envelope, stft_filter
+from zrmd.audio import fxdsp as F
+from zrmd.audio.fxdsp import param as P
+
+META = {"family": "notification", "kind": "source",
+        "description": "Additive triangle (odd harmonics 1/k^2) with a short pitch drop, attack and decay. UI clicks, taps, toggles, retro game blips. (12 October 2026)",
+        "tags": ["tonal", "triangle", "blip", "click", "ui", "retro"],
+        "sources": [{"what": "triangle Fourier series", "url": None, "licence": F.SOURCE}],
+        "licence": "original"}
+
+
+class UiBlipTri(Block):
+    ID = "ui_blip_tri"
+    PARAMS = [
+        P("f0_hz", "Hz", 100, 6000, 1200, "log", "start pitch"),
+        P("drop_st", "semitones", -24.0, 12.0, -5.0, "lin", "pitch change reached"),
+        P("drop_s", "s", 0.005, 0.3, 0.03, "log", "pitch change time constant"),
+        P("attack_s", "s", 0.0005, 0.05, 0.001, "log", "linear attack"),
+        P("decay_s", "s (T60)", 0.01, 1.0, 0.12, "log", "time to fall 60 dB"),
+        P("amp_db", "dBFS", -60, 0, -12, "lin", "peak level"),
+        P("onset_s", "s", 0.0, 0.25, 0.02, "lin", "start time in the window"),
+    ]
+
+    def synth(self, v, t, sr):
+        u = torch.clamp(t - v["onset_s"], min=0.0)
+        f = v["f0_hz"] * torch.pow(2.0, v["drop_st"] / 12.0 * (1.0 - torch.exp(-u / v["drop_s"])))
+        ph = F.TWO_PI * F.frac(F.cycles(f, sr))
+        y = torch.zeros_like(t)
+        for m, k in enumerate((1, 3, 5, 7, 9)):
+            y = y + ((-1.0) ** m / k ** 2) * F.nyquist_mask(k * f, sr) * torch.sin(k * ph)
+        return F.amp(v) * F.env_of(t, v) * y / 1.2
+
+
+BLOCK = UiBlipTri

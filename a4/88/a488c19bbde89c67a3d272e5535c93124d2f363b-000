@@ -1,0 +1,69 @@
+# 12 October 2026 (A4): hit_sequence, a roll or a burst of up to 16 hits whose timing, level and brightness each vary
+# (keyboard rolls, drum fills, rattles). The rate can accelerate or slow down (accel = end rate over start rate), each
+# hit has its own level (a crescendo slope plus a fixed R1 spread) and its own click band centre (a fixed R1 spread in
+# octaves), and every hit carries a pitched body under its click. Hits are placed by an exact frequency-domain delay
+# with a per-hit mask (sfxdsp.masked_delay_sum). Gap measured by the A3 calibration: keyboard and E005 envelope error.
+# Parameter categories (HDA, at most 8 each): timing (onset_s, count, rate_hz, accel, jitter), level (amp_db,
+# crescendo_db, level_spread_db), timbre (click_hz, bw_oct, bright_spread_oct, decay_s, body_hz, body_db).
+# Derived from the mathematics, no code copied. FR : roulement de frappes, cadence, niveau et brillance par frappe.
+import math
+
+import torch
+
+from zrmd.audio import sfxdsp as D
+from zrmd.audio.bank import Block, db_to_amp
+
+K, SALT_T, SALT_A, SALT_B = 16, 0.37, 0.59, 0.83
+TEMPLATE_N = 9600  # 12 October 2026 (A4): 0.2 s stroke template at 48 kHz, longer than the longest decay kept
+ATTACK_S = 0.0003
+META = D.meta("foley", "Hit sequence: a roll of up to 16 hits with accelerating or slowing rate, crescendo, per-hit level and brightness spread and a pitched body under each click.",
+              ["foley", "keyboard", "roll", "fill", "rattle", "pattern", "clicks", "drum"], "deterministic stroke pattern (R1 sequence), per-hit band mask, exact delays")
+
+
+class HitSequence(Block):
+    ID = "hit_sequence"
+    FIT = {"screenBlurMs": 25.0, "blurStartMs": 30.0, "blurEndMs": 2.0, "screenSamples": 768,
+           "scanGroups": [["onset_s", "rate_hz", "accel", "jitter"], "*"],
+           "scanPairs": [["rate_hz", "onset_s"], ["rate_hz", "accel"], ["click_hz", "bw_oct"]]}
+    PARAMS = [
+        D.param("count", "hits", 1, 16, 7, "lin", "number of hits (continuous)"),
+        D.param("rate_hz", "hits/s", 3, 30, 11.7, "log", "hit rate at the start"),
+        D.param("accel", "ratio", 0.5, 2.0, 1.0, "log", "rate at the last hit over rate at the first"),
+        D.param("jitter", "x period", 0.0, 0.5, 0.1, "lin", "timing deviation from the grid, fraction of the period"),
+        D.param("crescendo_db", "dB", -18, 18, 0, "lin", "level of the last hit relative to the first"),
+        D.param("level_spread_db", "dB", 0, 12, 3, "lin", "per-hit level variation (fixed pattern)"),
+        D.param("click_hz", "Hz", 300, 9000, 2500, "log", "click band centre"),
+        D.param("bw_oct", "octaves", 0.5, 6.0, 2.0, "log", "click band width"),
+        D.param("bright_spread_oct", "octaves", 0.0, 2.0, 0.3, "lin", "per-hit click centre variation (fixed pattern)"),
+        D.param("decay_s", "s (T60)", 0.005, 0.15, 0.04, "log", "decay of each hit"),
+        D.param("body_hz", "Hz", 40, 1200, 180, "log", "pitch of the body under each click"),
+        D.param("body_db", "dB", -50, 6, -20, "lin", "body level relative to the click"),
+        D.AMP(-14.0), D.ONSET(0.2, 0.02),
+    ]
+
+    def synth(self, v, t, sr):
+        dev = t.device
+        i = torch.arange(K, device=dev, dtype=torch.float32)
+        # Geometric rate change: period of hit i is period0 * accel^(-i / (K - 1)); cumulative sum gives the times.
+        per = (1.0 / v["rate_hz"]) * torch.pow(v["accel"], -i / (K - 1))
+        grid = torch.cat([torch.zeros(1, device=dev), torch.cumsum(per, 0)[:-1]])
+        times = v["onset_s"] + grid + v["jitter"] * (D.pattern(K, SALT_T, dev) - 0.5) * per
+        lvl = v["crescendo_db"] * i / (K - 1) - v["level_spread_db"] * D.pattern(K, SALT_A, dev)
+        w = D.soft_count(v["count"], K, dev) * db_to_amp(lvl)
+        centre = v["click_hz"] * torch.pow(2.0, v["bright_spread_oct"] * (D.pattern(K, SALT_B, dev) - 0.5))
+        u = D.template_time(t, TEMPLATE_N, sr)  # 13 October 2026: window-independent axis
+        env = D.decay(u, 0.0, v["decay_s"], ATTACK_S)
+        noise = D.stroke_noise(self, K, TEMPLATE_N, dev) * env[None, :]
+        body = math.sqrt(2.0) * torch.sin(2.0 * math.pi * v["body_hz"] * u) * env
+        sig = D.FWHM
+
+        def masks(f):
+            m = torch.exp(-0.5 * ((D.log2f(f) - torch.log2(centre)[:, None]) / (v["bw_oct"] / sig)) ** 2)
+            return m / torch.sqrt(torch.mean(m * m, dim=1, keepdim=True) + 1e-12)
+
+        clicks = D.masked_delay_sum(noise, masks, times, w, t.shape[0], sr)
+        bodies = D.delay_sum(body[None, :].expand(K, -1), times, w, t.shape[0], sr)
+        return db_to_amp(v["amp_db"]) * (clicks + db_to_amp(v["body_db"]) * bodies) / (1.0 + db_to_amp(v["body_db"]))
+
+
+BLOCK = HitSequence

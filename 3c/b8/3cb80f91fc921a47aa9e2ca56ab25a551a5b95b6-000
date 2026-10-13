@@ -1,0 +1,60 @@
+# 12 October 2026 (A4): drum_step_pattern, four drum hits on a regular step grid (a bar fragment of a drum part):
+# each hit is a pitched body (sine with an exponential pitch drop, 60 dB decay) plus a band of noise (its own fixed
+# noise excerpt, 60 dB decay), and every hit has its own body level and noise level, so one block plays a kick, a
+# snare, a hat or any mix of them per step. Hits are placed by an exact frequency-domain delay (sfxdsp.delay_sum), so
+# onset and step have smooth basins. Derived from the mathematics, no code copied.
+# FR : quatre frappes de batterie sur une grille réguliere, corps accordé plus bruit, niveaux par frappe.
+import math
+
+import torch
+
+from zrmd.audio import sfxdsp as D
+from zrmd.audio.bank import Block, db_to_amp
+
+K = 4
+TEMPLATE_N = 24000  # 12 October 2026 (A4): 0.5 s template at 48 kHz, the longest body decay kept inside it
+NOISE_BW_OCT = 2.0
+META = D.meta("drum", "Drum step pattern: four hits on a regular grid, each a pitched body plus a noise band with its own levels (a fragment of a drum part).",
+              ["drum", "pattern", "kick", "snare", "hat", "grid", "loop"], "pitched sine body with pitch drop plus band-passed noise, exact delays")
+
+
+class DrumStepPattern(Block):
+    ID = "drum_step_pattern"
+    FIT = {"screenBlurMs": 20.0, "blurStartMs": 25.0, "blurEndMs": 2.0, "screenSamples": 768,
+           "scanGroups": [["onset_s", "step_s"], "*"], "scanPairs": [["step_s", "onset_s"], ["body_hz", "drop_st"]]}
+    PARAMS = [
+        D.ONSET(0.25, 0.02),
+        D.param("step_s", "s", 0.06, 0.5, 0.17, "log", "time between two hits (a sixteenth at 88 BPM is 0.170 s)"),
+        D.param("body_hz", "Hz", 30, 400, 60, "log", "body pitch after the drop"),
+        D.param("drop_st", "semitones", 0, 36, 12, "lin", "pitch drop of the body from the hit"),
+        D.param("body_t60", "s (T60)", 0.03, 0.5, 0.25, "log", "body decay"),
+        D.param("noise_hz", "Hz", 300, 12000, 3000, "log", "noise band centre"),
+        D.param("noise_t60", "s (T60)", 0.01, 0.4, 0.08, "log", "noise decay"),
+        D.param("b1_db", "dB", -40, 0, 0, "lin", "body level of hit 1"),
+        D.param("b2_db", "dB", -40, 0, -40, "lin", "body level of hit 2"),
+        D.param("b3_db", "dB", -40, 0, -10, "lin", "body level of hit 3"),
+        D.param("b4_db", "dB", -40, 0, -40, "lin", "body level of hit 4"),
+        D.param("n1_db", "dB", -40, 0, -20, "lin", "noise level of hit 1"),
+        D.param("n2_db", "dB", -40, 0, -6, "lin", "noise level of hit 2"),
+        D.param("n3_db", "dB", -40, 0, -20, "lin", "noise level of hit 3"),
+        D.param("n4_db", "dB", -40, 0, -6, "lin", "noise level of hit 4"),
+        D.AMP(-14.0),
+    ]
+
+    def synth(self, v, t, sr):
+        dev = t.device
+        u = D.template_time(t, TEMPLATE_N, sr)  # 13 October 2026: window-independent axis
+        f = v["body_hz"] * torch.pow(2.0, v["drop_st"] / 12.0 * torch.exp(-u / 0.02))
+        body = torch.sin(2.0 * math.pi * torch.cumsum(f, 0) / sr) * D.decay(u, 0.0, v["body_t60"], 0.0005)
+        noise = D.stroke_noise(self, K, TEMPLATE_N, dev)
+        noise = D.filtered(noise.reshape(-1), lambda fr: D.band(fr, v["noise_hz"], NOISE_BW_OCT), sr).reshape(K, TEMPLATE_N)
+        noise = noise * D.decay(u, 0.0, v["noise_t60"], 0.0003)[None, :]
+        times = v["onset_s"] + torch.arange(K, device=dev, dtype=torch.float32) * v["step_s"]
+        bw = db_to_amp(torch.stack([v["b1_db"], v["b2_db"], v["b3_db"], v["b4_db"]]))
+        nw = db_to_amp(torch.stack([v["n1_db"], v["n2_db"], v["n3_db"], v["n4_db"]]))
+        tpl_b = body[None, :].expand(K, TEMPLATE_N)
+        y = D.delay_sum(tpl_b, times, bw, t.shape[0], sr) + D.delay_sum(noise, times, nw, t.shape[0], sr)
+        return db_to_amp(v["amp_db"]) * y
+
+
+BLOCK = DrumStepPattern

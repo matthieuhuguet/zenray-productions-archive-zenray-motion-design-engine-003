@@ -1,0 +1,143 @@
+# 12 October 2026, 21:10 CEST: command line of the F1 font matcher and font creator (zrmd.vector).
+# Subcommands:
+#   match  --mask CROP.png --text "..."            rank the free font dataset against a reference text crop
+#   create --mask CROP.png --text "..." --id ID    match, then fit a parametric font; writes the workshop folder
+#                                                  fonts/<ID>/V_NNN/ (font.ttf, params.json, fit.json, preview.png)
+#   vary   --id ID [--from V_NNN] --set global.weight_units=12 [--set ...]
+#                                                  new version from a parent's params with overrides, rebuilt
+#   build  --params params.json --out font.ttf     rebuild a font from its parameters (deterministic bytes)
+# A 1:1 font of a proprietary reference stays private in the workshop; only variations may be published after
+# rights validation (Rules.md of zenray-motion-design, 12 October 2026). Versions are never overwritten.
+from __future__ import annotations
+
+import argparse
+import json
+import sys
+from pathlib import Path
+
+REPO = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(REPO))
+
+import numpy as np  # noqa: E402
+
+from zrmd import settings, versions  # noqa: E402
+from zrmd.vector import fontcreate as FC  # noqa: E402
+from zrmd.vector import fontfit as FF  # noqa: E402
+
+
+def load_mask(path: str, light_on_dark: bool) -> np.ndarray:
+    from PIL import Image
+    return FF.crop_to_mask(np.asarray(Image.open(path).convert("L")), light_on_dark)
+
+
+def save_preview(mask: np.ndarray, ref: np.ndarray | None, path: Path) -> None:
+    """Red = reference, green = rebuilt font, yellow where they agree."""
+    from PIL import Image
+    if ref is None:
+        rgb = np.stack([mask] * 3, -1)
+    else:
+        rgb = np.stack([ref, mask, np.zeros_like(mask)], -1)
+    Image.fromarray((np.clip(rgb, 0, 1) * 255).astype(np.uint8)).save(path)
+
+
+def font_dir(font_id: str) -> Path:
+    return Path(settings.get("vector.create.out_dir")) / font_id
+
+
+def write_version(font_id: str, params: dict, fit_info: dict, ref: np.ndarray | None, note: str,
+                  parent: str | None) -> Path:
+    root = font_dir(font_id)
+    name = versions.next_version(root)
+    vdir = root / name
+    vdir.mkdir(parents=True, exist_ok=False)
+    family = f"ZRMD {font_id} {name}"
+    built = FC.build_font(params, vdir / "font.ttf", family)
+    (vdir / "params.json").write_text(json.dumps(params, indent=1, ensure_ascii=False))
+    canvas = tuple(fit_info.get("canvas") or (ref.shape[1], ref.shape[0]))
+    m = FC.render_built(built["file"], params, canvas)
+    score = FF.score(ref, m) if ref is not None else None
+    if ref is not None:
+        np.save(vdir / "reference-mask.npy", ref)
+    save_preview(m, ref, vdir / "preview.png")
+    info = {"schema": "zrmd/font-version@1", "date": versions.stamp(), "id": font_id, "version": name,
+            "parent": parent, "note": note, "family": family, "build": built, "score": score,
+            "private": True, **fit_info}
+    (vdir / "fit.json").write_text(json.dumps(info, indent=1, ensure_ascii=False, default=str))
+    return vdir
+
+
+def main() -> int:
+    ap = argparse.ArgumentParser(description=__doc__)
+    sub = ap.add_subparsers(dest="cmd", required=True)
+    for name in ("match", "create"):
+        s = sub.add_parser(name)
+        s.add_argument("--mask", required=True)
+        s.add_argument("--text", required=True)
+        s.add_argument("--dark-on-light", action="store_true")
+        s.add_argument("--exclude", action="append", default=[])
+        if name == "create":
+            s.add_argument("--id", required=True)
+    v = sub.add_parser("vary")
+    v.add_argument("--id", required=True)
+    v.add_argument("--from", dest="parent")
+    v.add_argument("--set", action="append", default=[], help="dotted.key=value (JSON value)")
+    b = sub.add_parser("build")
+    b.add_argument("--params", required=True)
+    b.add_argument("--out", required=True)
+    b.add_argument("--family", default="ZRMD Font")
+    args = ap.parse_args()
+
+    if args.cmd in ("match", "create"):
+        ref = load_mask(args.mask, not args.dark_on_light)
+        m = FF.match_font(ref, args.text, exclude_families=args.exclude)
+        if args.cmd == "match":
+            print(json.dumps({k: m[k] for k in ("candidates", "match", "coarse")} | {
+                "fits": [{k: f[k] for k in ("family", "iou", "edge_mean", "match", "params")} for f in m["fits"]]},
+                indent=1, default=str))
+            return 0
+        work = font_dir(args.id) / "_work"
+        if m["match"]:
+            print(json.dumps({"match": True, "family": m["best"]["family"], "iou": m["best"]["iou"],
+                              "note": "a free family already reaches the match rule; no font is created"}))
+            return 0
+        # 12 October 2026: multi-start creator (first vector.create.starts distinct matcher families).
+        r = FC.create_font(ref, args.text, m, work, log=lambda s: print(s, file=sys.stderr))
+        vdir = write_version(args.id, r["params"], {"canvas": [ref.shape[1], ref.shape[0]], "trace": r["trace"],
+                                                    "matcher_best": {k: m["best"][k] for k in ("family", "iou")},
+                                                    "start": r["start"], "starts": r["starts"]},
+                             ref, "fitted from the reference crop", None)
+        print(json.dumps({"version": str(vdir), "score": json.loads((vdir / "fit.json").read_text())["score"]}))
+        return 0
+
+    if args.cmd == "vary":
+        root = font_dir(args.id)
+        parent = args.parent or versions.latest_version(root)
+        if not parent:
+            raise SystemExit(f"{root} has no version to vary")
+        params = json.loads((root / parent / "params.json").read_text())
+        for item in args.set:
+            key, _, raw = item.partition("=")
+            node = params
+            parts = key.split(".")
+            for k in parts[:-1]:
+                if k not in node:
+                    raise SystemExit(f"params has no '{key}'")
+                node = node[k]
+            if parts[-1] not in node:
+                raise SystemExit(f"params has no '{key}'")
+            node[parts[-1]] = json.loads(raw)
+        info = json.loads((root / parent / "fit.json").read_text())
+        ref_file = root / parent / "reference-mask.npy"
+        ref = np.load(ref_file) if ref_file.exists() else None
+        vdir = write_version(args.id, params, {"canvas": info.get("canvas")}, ref, "variation: " + " ".join(args.set),
+                             parent)
+        print(json.dumps({"version": str(vdir)}))
+        return 0
+
+    params = json.loads(Path(args.params).read_text())
+    print(json.dumps(FC.build_font(params, Path(args.out), args.family)))
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

@@ -1,0 +1,95 @@
+{
+  "id": "keyboard_typing",
+  "family": "foley",
+  "description": "Keyboard typing: a deterministic pattern of key clicks with count, rate, jitter and accent as parameters. (12 October 2026)",
+  "tags": [
+    "foley",
+    "keyboard",
+    "typing",
+    "pattern",
+    "clicks"
+  ],
+  "sources": [
+    {
+      "what": "deterministic stroke pattern (R1 sequence) of filtered noise clicks",
+      "url": null,
+      "licence": "original (derived from the mathematics, no code copied)"
+    }
+  ],
+  "licence": "original",
+  "params": [
+    {
+      "name": "count",
+      "unit": "strokes",
+      "min": 1.0,
+      "max": 16.0,
+      "default": 6.0,
+      "scale": "lin",
+      "description": "number of strokes (continuous)"
+    },
+    {
+      "name": "rate_hz",
+      "unit": "strokes/s",
+      "min": 3.0,
+      "max": 16.0,
+      "default": 8.0,
+      "scale": "log",
+      "description": "mean stroke rate"
+    },
+    {
+      "name": "jitter",
+      "unit": "x period",
+      "min": 0.0,
+      "max": 0.6,
+      "default": 0.25,
+      "scale": "lin",
+      "description": "timing deviation from the grid, as a fraction of the period"
+    },
+    {
+      "name": "accent_db",
+      "unit": "dB",
+      "min": 0.0,
+      "max": 12.0,
+      "default": 4.0,
+      "scale": "lin",
+      "description": "level variation between strokes"
+    },
+    {
+      "name": "click_hz",
+      "unit": "Hz",
+      "min": 1000.0,
+      "max": 9000.0,
+      "default": 3000.0,
+      "scale": "log",
+      "description": "click band centre"
+    },
+    {
+      "name": "decay_s",
+      "unit": "s (T60)",
+      "min": 0.008,
+      "max": 0.1,
+      "default": 0.03,
+      "scale": "log",
+      "description": "decay of each stroke"
+    },
+    {
+      "name": "amp_db",
+      "unit": "dBFS",
+      "min": -60.0,
+      "max": 0.0,
+      "default": -14.0,
+      "scale": "lin",
+      "description": "peak level of the main layer"
+    },
+    {
+      "name": "onset_s",
+      "unit": "s",
+      "min": 0.0,
+      "max": 0.2,
+      "default": 0.02,
+      "scale": "lin",
+      "description": "start time in the window"
+    }
+  ],
+  "date": "12 October 2026"
+}

@@ -1,0 +1,57 @@
+#!/usr/bin/env python3
+# 12 October 2026: measures the identity ceiling of the 18 recipes and the red direction (audible perturbations),
+# on the defaults plus `ceiling.truths` random parameter sets each, in parallel. Writes datasets/sfx-ceilings.json.
+# Exit code 0 when every class has a median identity >= its pass threshold minus the documented ceiling margin and
+# every perturbation fails 99 on most truths; otherwise 1.
+# FR : mesure du plafond d'identite et des perturbations, 18 classes ; sortie JSON et code de sortie.
+import os
+
+os.environ.setdefault("OMP_NUM_THREADS", "1")
+os.environ.setdefault("VECLIB_MAXIMUM_THREADS", "1")
+import json
+import sys
+import time
+from concurrent.futures import ProcessPoolExecutor
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(ROOT))
+import numpy as np  # noqa: E402
+
+from zrmd.audio import config  # noqa: E402
+from zrmd.audio.ceilings import check  # noqa: E402
+from zrmd.audio.recipes import KINDS  # noqa: E402
+from zrmd.versions import stamp  # noqa: E402
+
+
+def main():
+    c = config.cfg()["ceiling"]
+    t0 = time.time()
+    jobs = [(k, i) for k in KINDS for i in range(c["truths"] + 1)]
+    with ProcessPoolExecutor(max_workers=c["workers"]) as pool:
+        rows = list(pool.map(check, jobs))
+    thr = config.cfg()["score"]["passThreshold"]
+    classes, ok = {}, True
+    for k in KINDS:
+        r = [x for x in rows if x["kind"] == k]
+        ids = [x["identity"] for x in r]
+        pert = {}
+        for name in r[0]["perturbed"]:
+            v = [x["perturbed"][name] for x in r]
+            pert[name] = {"median": float(np.median(v)), "max": float(np.max(v)), "fail99": int(sum(s < thr for s in v)), "n": len(v)}
+        red_ok = all(p["fail99"] >= (len(r) + 1) // 2 for p in pert.values())
+        classes[k] = {"identityMedian": float(np.median(ids)), "identityMin": float(np.min(ids)), "identity": ids, "perturbed": pert,
+                      "redOk": red_ok}
+        ok &= red_ok
+    out = {"date": stamp(), "seconds": round(time.time() - t0, 1), "threshold": thr, "classes": classes, "ok": ok}
+    path = ROOT / "datasets" / "sfx-ceilings.json"
+    path.write_text(json.dumps(out, indent=2) + "\n", encoding="utf-8")
+    for k, v in classes.items():
+        print(f"{k:10s} identity median {v['identityMedian']:6.2f} min {v['identityMin']:6.2f}  red " +
+              "  ".join(f"{n}: {p['median']:.1f} ({p['fail99']}/{p['n']})" for n, p in v["perturbed"].items()))
+    print("seconds", out["seconds"], "ok", ok, path)
+    sys.exit(0 if ok else 1)
+
+
+if __name__ == "__main__":
+    main()

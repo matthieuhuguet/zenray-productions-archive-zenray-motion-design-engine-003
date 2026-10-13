@@ -1,0 +1,248 @@
+# 12 October 2026, 13:20 CEST: reproduce a product shot with the parametric 3D device (three.js, templates/device3d).
+# Measured on the reference, never copied: the device outline per frame from its metal frame colour (centre and
+# on-screen width, the width extrapolated log-linearly where the device overflows the frame), the frame colour,
+# the screen wallpaper as a low-resolution colour grid, the outline aspect. The device itself is generic and
+# parametric (aspect, depth, corner radius, bezel, metal), its label original.
+# Fidelity: silhouette IoU per frame (reference mask from the frame colour, render mask from the same rule),
+# grade of the screen (CIEDE2000), and image SSIM of the whole frame at 480x270 for information.
+# Run: python -I Scripts/ReproduceDevice3D.py --slug onekey-pro-2 --start 1.333 --end 2.9 --motion <workshop>/motions/<id>
+from __future__ import annotations
+
+import argparse
+import json
+import shutil
+import sys
+from pathlib import Path
+
+import cv2
+import numpy as np
+from skimage.metrics import structural_similarity
+
+ENGINE = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(ENGINE))
+from zrmd import settings, versions  # noqa: E402
+from zrmd.media import read_frames  # noqa: E402
+from zrmd.render import render  # noqa: E402
+
+FPS = 60
+
+
+def frame_mask(f: np.ndarray, rule: dict) -> np.ndarray:
+    r, g, b = f[..., 0].astype(np.float32), f[..., 1].astype(np.float32), f[..., 2].astype(np.float32)
+    m = ((r > rule["r_min"]) & (r > rule["rg"] * g) & (r > rule["rb"] * b)).astype(np.uint8)
+    return cv2.morphologyEx(m, cv2.MORPH_CLOSE, np.ones((5, 5), np.uint8))
+
+
+def outline(mask: np.ndarray, scale: float):
+    ys, xs = np.nonzero(mask)
+    if len(xs) < 50:
+        return None
+    x0, x1, y0, y1 = xs.min(), xs.max(), ys.min(), ys.max()
+    h, w = mask.shape
+    # A top (bottom) edge counts only where the rim crosses the central half of the outline horizontally; side
+    # rims emerging from behind an occluder (the circular reveal) start low without being the device's top.
+    cx0, cx1 = x0 + (x1 - x0) // 4, x1 - (x1 - x0) // 4
+    def crosses(y):
+        r = max(4, int(0.25 * (x1 - x0)))  # tolerates the tilt plus the corner radius (measured 12 October 2026)
+        band = mask[max(0, y - r):y + r + 1, cx0:cx1] if y < h // 2 else mask[max(0, y - r):y + r + 1, cx0:cx1]
+        return band.any(axis=0).mean() > 0.3
+    return {"x0": x0 * scale, "x1": x1 * scale, "y0": y0 * scale, "y1": y1 * scale,
+            "top_ok": bool(y0 > 2 and crosses(y0)), "bot_ok": bool(y1 < h - 3 and crosses(y1)), "n": int(len(xs))}
+
+
+def measure(video: str, start: float, end: float, rule: dict) -> dict:
+    frames = read_frames(video, 960, 540, start=start, duration=end - start)
+    scale = 2.0
+    outs = [outline(frame_mask(f, rule), scale) for f in frames]
+    full = [o for o in outs if o and o["top_ok"] and o["bot_ok"]]
+    aspect = float(np.median([(o["y1"] - o["y0"]) / (o["x1"] - o["x0"]) for o in full])) if full else 1.55
+    # Width: measured where the outline is complete horizontally (the frame colour reaches both sides),
+    # log-linear extrapolation where the device is not yet visible.
+    t = np.arange(len(frames)) / FPS
+    valid = np.array([o is not None and o["n"] > rule["min_px"] for o in outs])
+    w = np.array([(o["x1"] - o["x0"]) if o else np.nan for o in outs])
+    if valid.sum() >= 4:
+        k = np.polyfit(t[valid][:12], np.log(w[valid][:12]), 1)
+        w = np.where(valid, w, np.exp(np.polyval(k, t)))
+    cx = np.array([((o["x0"] + o["x1"]) / 2) if o else 960.0 for o in outs])
+    # Vertical centre: from the visible top (or bottom) edge; where neither is visible, from the linear relation
+    # cy = a + b * w measured on the other frames (the camera dollies along a fixed axis).
+    cy = np.full(len(outs), np.nan)
+    for i, (o, ww) in enumerate(zip(outs, w)):
+        if o and o["top_ok"]:
+            cy[i] = o["y0"] + aspect * ww / 2
+        elif o and o["bot_ok"]:
+            cy[i] = o["y1"] - aspect * ww / 2
+    known = np.isfinite(cy)
+    if known.sum() >= 4:
+        kk = np.polyfit(w[known], cy[known], 1)
+        cy = np.where(known, cy, np.polyval(kk, w))
+    else:
+        cy = np.where(known, cy, 540.0)
+    # cx likewise where the outline is missing
+    has = np.array([o is not None for o in outs])
+    if has.sum() >= 4 and (~has).any():
+        kx = np.polyfit(w[has], cx[has], 1)
+        cx = np.where(has, cx, np.polyval(kx, w))
+    # In-plane tilt per frame (degrees), from the minimum-area rectangle on frames where the whole outline shows.
+    rz = np.zeros(len(outs))
+    for i, (f, o) in enumerate(zip(frames, outs)):
+        if o and o["top_ok"] and o["bot_ok"]:
+            (_, _), (rw, rh), ang = cv2.minAreaRect(cv2.findNonZero(frame_mask(f, rule)))
+            w[i] = min(rw, rh) * 2.0  # 12 October 2026: true width; the x-extent of a tilted device is w cos + h sin
+            dev = ang - 90 if ang > 45 else ang
+            rz[i] = -(dev + 90) if dev < -45 else -dev
+    # smooth (doubled-frame cadence, pixel quantisation)
+    from scipy.signal import savgol_filter
+    w, cx, cy, rz = (savgol_filter(v, 9, 2) for v in (w, cx, cy, rz))
+    # frame colour and screen wallpaper, at the clearest complete frame
+    best = max(range(len(outs)), key=lambda i: outs[i]["n"] if outs[i] and outs[i]["top_ok"] and outs[i]["bot_ok"] else -1)
+    f = frames[best].astype(np.float32); m = frame_mask(frames[best], rule).astype(bool)
+    frame_rgb = [float(v) for v in np.median(f[m], axis=0)]
+    grids = screen_grids(frames, w / scale, cx / scale, cy / scale, aspect, rule)
+    return {"aspect": round(aspect, 4), "frame_rgb": frame_rgb, "grids": grids,
+            "track": [{"cx": round(float(a), 2), "cy": round(float(b), 2), "w": round(float(c), 2), "rx": 0, "ry": 0, "rz": round(float(d) * rule["rz_sign"], 3)}
+                      for a, b, c, d in zip(cx, cy, w, rz)], "valid_frames": int(valid.sum())}
+
+
+def screen_grids(frames, w, cx, cy, aspect, rule) -> list:
+    """Screen colour per frame as a low-resolution grid, sampled inside the measured outline (inset by the bezel)
+    by a perspective-free affine warp. Small bright marks (status bar, words, icons) are removed first by a grey
+    opening sized to the screen, so no reference text or glyph reaches the texture: only light and colour remain."""
+    gw, gh, bez = rule["grid"][0], rule["grid"][1], rule["bezel"]
+    out = []
+    for f, ww, x, y in zip(frames, w, cx, cy):
+        sw, sh = ww * (1 - 2 * bez), ww * (aspect - 2 * bez)
+        k = max(3, int(round(rule["text_kernel"] * sw)) | 1)
+        clean = cv2.morphologyEx(f, cv2.MORPH_OPEN, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (k, k)))
+        src = np.float32([[x - sw / 2, y - sh / 2], [x + sw / 2, y - sh / 2], [x - sw / 2, y + sh / 2]])
+        dst = np.float32([[0, 0], [gw * 4, 0], [0, gh * 4]])
+        warp = cv2.warpAffine(clean, cv2.getAffineTransform(src, dst), (gw * 4, gh * 4), flags=cv2.INTER_AREA,
+                              borderMode=cv2.BORDER_REPLICATE)
+        out.append(cv2.resize(warp, (gw, gh), interpolation=cv2.INTER_AREA).round().astype(int).tolist())
+    return out
+
+
+def screen_shader(fit_path: Path, start_frame_offset: int = 0) -> dict:
+    """12 October 2026: keyframed procedural screen. Every keyframe composition (FitDeviceScreenStack output) must share
+    the same layer structure; the fragment comes from zrmd.shaders.compose.emit_glsl and is adapted to a mesh (vUv)."""
+    from zrmd.shaders import compose
+    fit = json.loads(Path(fit_path).read_text())
+    comps, frames = fit["compositions"], [f["frame"] for f in fit["frames"]]
+    src, uni0 = compose.emit_glsl(comps[0])
+    names0 = [u["name"] for u in uni0]
+    keys = []
+    for f, c in zip(frames, comps):
+        _, uni = compose.emit_glsl(c)
+        if [u["name"] for u in uni] != names0:
+            raise ValueError(f"keyframe {f}: layer structure differs from keyframe {frames[0]}")
+        keys.append({"f": f + start_frame_offset, "u": {u["name"]: u["value"] for u in uni}})
+    frag = (src.replace("#version 300 es\n", "").replace("out vec4 zr_frag;\n", "out vec4 zr_frag;  // 12 October 2026: three GLSL3 has no gl_FragColor\nin vec2 vUv;\n")
+               .replace("uniform vec2 u_resolution;\n", "")
+               .replace("vec2 uv = vec2(gl_FragCoord.x / u_resolution.x, 1.0 - gl_FragCoord.y / u_resolution.y);",
+                        "vec2 uv = vec2(vUv.x, 1.0 - vUv.y);")
+               )
+    if "precision highp float;" in frag:
+        frag = frag.replace("precision highp float;\n", "")
+    return {"frag": frag, "keys": keys}
+
+
+def cook(params: dict, out: Path) -> Path:
+    project = out / "16x9"
+    if project.exists():
+        shutil.rmtree(project)
+    (project / "vendor").mkdir(parents=True)
+    shutil.copytree(ENGINE / "vendor" / "three", project / "vendor" / "three")
+    shutil.copy(ENGINE / "templates" / "device3d" / "scene.js", project / "scene.js")
+    c = params["canvas"]
+    dur = f"{c['frames'] / c['fps']:.6f}"
+    (project / "index.html").write_text(f"""<!doctype html>
+<!-- Cooked by zrmd ReproduceDevice3D from params.json (12 October 2026); never edit by hand. -->
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width={c['width']}, height={c['height']}">
+<script type="importmap">{{"imports":{{"three":"./vendor/three/build/three.module.js","three/addons/":"./vendor/three/examples/jsm/"}}}}</script>
+<style>html, body {{ margin: 0; padding: 0; background: #000; }} #stage {{ width: {c['width']}px; height: {c['height']}px; display: block; }}</style>
+</head><body>
+<div id="root" data-composition-id="main" data-start="0" data-duration="{dur}" data-width="{c['width']}" data-height="{c['height']}" data-fps="{c['fps']}" data-no-timeline>
+  <canvas id="stage" width="{c['width']}" height="{c['height']}"></canvas>
+</div>
+<script>window.ZR_DEVICE = {json.dumps(params['device3d'], separators=(',', ':'))};</script>
+<script type="module" src="./scene.js"></script>
+</body></html>
+""", encoding="utf-8")
+    (project / "hyperframes.json").write_text(json.dumps({"$schema": "https://hyperframes.heygen.com/schema/hyperframes.json"}) + "\n")
+    return project
+
+
+def filled(mask: np.ndarray) -> np.ndarray:
+    """12 October 2026: the region enclosed by the rim, as the convex hull of the rim pixels."""
+    pts = cv2.findNonZero(mask)
+    out = np.zeros(mask.shape, np.uint8)
+    if pts is not None and len(pts) > 20:
+        cv2.fillConvexPoly(out, cv2.convexHull(pts), 1)
+    return out.astype(bool)
+
+
+def score(ref: str, out: str, start: float, duration: float, rule: dict) -> dict:
+    a = read_frames(ref, 480, 270, start=start, duration=duration)
+    b = read_frames(out, 480, 270, start=0, duration=duration)
+    n = min(len(a), len(b))
+    ious, ssims = [], []
+    for i in range(n):
+        # Filled outline (rim plus everything it encloses): a thin rim alone loses its IoU to a 1 px offset.
+        ma, mb = filled(frame_mask(a[i], rule)), filled(frame_mask(b[i], rule))
+        if ma.sum() > 30 or mb.sum() > 30:
+            ious.append(float((ma & mb).sum() / max((ma | mb).sum(), 1)))
+        if i % 3 == 0:
+            ssims.append(float(structural_similarity(a[i], b[i], channel_axis=2, data_range=255)))
+    # Rim colour: median of the reference rim pixels against the render's pixels at the same places (CIEDE2000).
+    from skimage.color import deltaE_ciede2000, rgb2lab
+    des = []
+    for i in range(0, n, 6):
+        ma = frame_mask(a[i], rule).astype(bool)
+        if ma.sum() > 30:
+            ca, cb = np.median(a[i][ma], axis=0), np.median(b[i][ma], axis=0)
+            des.append(float(deltaE_ciede2000(rgb2lab(ca[None, None] / 255), rgb2lab(cb[None, None] / 255))[0, 0]))
+    return {"rim_dE2000": round(float(np.median(des)), 2) if des else None,
+            "silhouette_iou": round(float(np.mean(ious)) if ious else 0.0, 4), "silhouette_iou_min": round(float(np.min(ious)) if ious else 0.0, 4),
+            "ssim": round(float(np.mean(ssims)), 4), "frames": n}
+
+
+def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--slug", required=True); ap.add_argument("--start", type=float, required=True)
+    ap.add_argument("--end", type=float, required=True); ap.add_argument("--motion", required=True)
+    ap.add_argument("--set", action="append", default=[], help="override device controls, e.g. device.radius=0.14")
+    ap.add_argument("--screen-fit", default="", help="FitDeviceScreenStack fit.json: procedural screen shader (12 October 2026)")
+    a = ap.parse_args()
+    meta = json.loads((settings.path("workshop") / "references" / a.slug / "reference.json").read_text(encoding="utf-8"))
+    video = str(settings.path("refcache") / a.slug / meta["file_name"])
+    fam = json.loads((ENGINE / "params" / "device3d.json").read_text(encoding="utf-8"))
+    m = measure(video, a.start, a.end, fam["frame_rule"])
+    frames = int(round((a.end - a.start) * FPS))
+    dev = dict(fam["device"]); dev["aspect"] = m["aspect"]; dev["frame_rgb"] = m["frame_rgb"]
+    params = {"schema": "zrmd/motion@1", "canvas": {"width": 1920, "height": 1080, "fps": FPS, "frames": frames},
+              "device3d": {"canvas": {"width": 1920, "height": 1080, "fps": FPS}, "background": fam["background"],
+                           "camera": fam["camera"], "device": dev,
+                           "screen": {**fam["screen"], "grids": m["grids"]}, "track": m["track"]}}
+    if a.screen_fit:
+        params["device3d"]["screen"]["shader"] = screen_shader(Path(a.screen_fit))
+    for item in a.set:
+        key, _, raw = item.partition("=")
+        versions.set_path(params["device3d"], key, json.loads(raw))
+    motion = Path(a.motion)
+    vdir = versions.create_version(motion, params, note="parametric 3D device, measured placement")
+    meta_m = versions.read_json(motion / "motion.json", {}) or {}
+    meta_m.update({"id": motion.name, "title": "Device pull-back, 3D", "recipe": "device3d",
+                   "source": {"slug": a.slug, "start": a.start, "end": a.end}, "tags": ["3d", "device", "camera", a.slug]})
+    versions.write_json(motion / "motion.json", meta_m)
+    project = cook(params, vdir)
+    outp = render(project, vdir / "render.mp4")
+    sc = score(video, str(outp), a.start, a.end - a.start, fam["frame_rule"])
+    rep = {"score": sc["silhouette_iou"], "dimensions": {"silhouette": sc["silhouette_iou"]}, "detail": sc,
+           "measured": {"aspect": m["aspect"], "frame_rgb": m["frame_rgb"], "valid_frames": m["valid_frames"]}}
+    (vdir / "fidelity.json").write_text(json.dumps(rep, indent=1) + "\n", encoding="utf-8")
+    print(json.dumps({"version": vdir.name, **rep}))
+
+
+if __name__ == "__main__":
+    main()

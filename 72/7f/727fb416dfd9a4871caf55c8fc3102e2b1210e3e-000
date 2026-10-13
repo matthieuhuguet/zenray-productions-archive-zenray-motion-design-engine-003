@@ -1,0 +1,70 @@
+{
+  "id": "compressor",
+  "family": "dynamics",
+  "kind": "effect",
+  "description": "Feed-forward RMS compressor approximation (threshold, ratio, soft knee, one time constant, makeup). Glue, sustain, pumping, levelling. (12 October 2026)",
+  "tags": [
+    "effect",
+    "dynamics",
+    "compressor",
+    "glue",
+    "sustain"
+  ],
+  "sources": [
+    {
+      "what": "soft-knee gain computer",
+      "url": null,
+      "reference": "D. Giannoulis, M. Massberg, J. Reiss, Digital dynamic range compressor design, JAES 60(6), 2012",
+      "licence": "original (derived from the published mathematics, no code copied)"
+    }
+  ],
+  "licence": "original",
+  "params": [
+    {
+      "name": "threshold_db",
+      "unit": "dBFS",
+      "min": -48.0,
+      "max": 0.0,
+      "default": -28.0,
+      "scale": "lin",
+      "description": "level where compression starts"
+    },
+    {
+      "name": "ratio",
+      "unit": "x",
+      "min": 1.0,
+      "max": 20.0,
+      "default": 6.0,
+      "scale": "log",
+      "description": "compression ratio"
+    },
+    {
+      "name": "knee_db",
+      "unit": "dB",
+      "min": 0.0,
+      "max": 12.0,
+      "default": 6.0,
+      "scale": "lin",
+      "description": "soft knee width"
+    },
+    {
+      "name": "time_ms",
+      "unit": "ms",
+      "min": 1.0,
+      "max": 300.0,
+      "default": 30.0,
+      "scale": "log",
+      "description": "RMS follower time constant (attack and release)"
+    },
+    {
+      "name": "makeup_db",
+      "unit": "dB",
+      "min": 0.0,
+      "max": 24.0,
+      "default": 6.0,
+      "scale": "lin",
+      "description": "makeup gain (default 6, 12 October 2026: peak under 0 dBFS)"
+    }
+  ],
+  "date": "12 October 2026"
+}

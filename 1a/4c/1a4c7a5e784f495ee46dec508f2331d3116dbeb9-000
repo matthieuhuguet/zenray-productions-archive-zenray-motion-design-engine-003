@@ -1,0 +1,86 @@
+{
+  "id": "crash_cymbal",
+  "family": "cymbal",
+  "description": "Crash cymbal: 24 inharmonic partials and high-passed noise with a long decay, plus a bright fast-decaying band. (12 October 2026)",
+  "tags": [
+    "cymbal",
+    "crash",
+    "metallic",
+    "noise",
+    "long"
+  ],
+  "sources": [
+    {
+      "what": "inharmonic partials and filtered noise",
+      "url": null,
+      "licence": "original (derived from the mathematics, no code copied)"
+    }
+  ],
+  "licence": "original",
+  "params": [
+    {
+      "name": "lo_hz",
+      "unit": "Hz",
+      "min": 300.0,
+      "max": 3000.0,
+      "default": 800.0,
+      "scale": "log",
+      "description": "lowest partial and high-pass of the wash"
+    },
+    {
+      "name": "hi_hz",
+      "unit": "Hz",
+      "min": 3000.0,
+      "max": 16000.0,
+      "default": 9000.0,
+      "scale": "log",
+      "description": "highest partial and bright band centre"
+    },
+    {
+      "name": "metal_db",
+      "unit": "dB re noise",
+      "min": -30.0,
+      "max": 6.0,
+      "default": -6.0,
+      "scale": "lin",
+      "description": "partials level"
+    },
+    {
+      "name": "decay_s",
+      "unit": "s (T60)",
+      "min": 0.3,
+      "max": 4.0,
+      "default": 1.8,
+      "scale": "log",
+      "description": "wash decay"
+    },
+    {
+      "name": "bright_decay_s",
+      "unit": "s (T60)",
+      "min": 0.02,
+      "max": 0.8,
+      "default": 0.15,
+      "scale": "log",
+      "description": "bright band decay"
+    },
+    {
+      "name": "amp_db",
+      "unit": "dBFS",
+      "min": -60.0,
+      "max": 0.0,
+      "default": -16.0,
+      "scale": "lin",
+      "description": "peak level of the main layer"
+    },
+    {
+      "name": "onset_s",
+      "unit": "s",
+      "min": 0.0,
+      "max": 0.1,
+      "default": 0.01,
+      "scale": "lin",
+      "description": "start time in the window"
+    }
+  ],
+  "date": "12 October 2026"
+}

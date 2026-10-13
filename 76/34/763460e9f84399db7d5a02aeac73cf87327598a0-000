@@ -1,0 +1,40 @@
+# 12 October 2026: notify_chirp, an exponential chirp from f_start_hz to f_end_hz over dur_s (then holding), plus a
+# second harmonic, attack and decay. Swipes, pops, rising confirmations, laser zaps. FR : glissement exponentiel bref.
+import math
+
+import torch
+
+from zrmd.audio.bank import Block, db_to_amp, envelope, stft_filter
+from zrmd.audio import fxdsp as F
+from zrmd.audio.fxdsp import param as P
+
+META = {"family": "notification", "kind": "source",
+        "description": "Exponential chirp from a start to an end frequency over a duration, second harmonic, attack and decay. Swipe up, pop, zap, confirm. (12 October 2026)",
+        "tags": ["tonal", "chirp", "sweep", "swipe", "zap", "ui"],
+        "sources": [{"what": "exponential chirp by phase accumulation", "url": None, "licence": F.SOURCE}],
+        "licence": "original"}
+
+
+class NotifyChirp(Block):
+    ID = "notify_chirp"
+    PARAMS = [
+        P("f_start_hz", "Hz", 100, 8000, 500, "log", "start frequency"),
+        P("f_end_hz", "Hz", 100, 12000, 2500, "log", "end frequency"),
+        P("dur_s", "s", 0.02, 0.8, 0.18, "log", "chirp duration"),
+        P("h2_db", "dB", -60, 0, -24, "lin", "second harmonic level"),
+        P("attack_s", "s", 0.001, 0.1, 0.004, "log", "linear attack"),
+        P("decay_s", "s (T60)", 0.03, 2.0, 0.3, "log", "time to fall 60 dB"),
+        P("amp_db", "dBFS", -60, 0, -12, "lin", "peak level"),
+        P("onset_s", "s", 0.0, 0.25, 0.02, "lin", "start time in the window"),
+    ]
+
+    def synth(self, v, t, sr):
+        k = torch.clamp((t - v["onset_s"]) / v["dur_s"], 0.0, 1.0)
+        f = v["f_start_hz"] * torch.pow(v["f_end_hz"] / v["f_start_hz"], k)
+        ph = F.TWO_PI * F.frac(F.cycles(f, sr))
+        h2 = db_to_amp(v["h2_db"])
+        y = (torch.sin(ph) + h2 * F.nyquist_mask(2.0 * f, sr) * torch.sin(2.0 * ph)) / (1.0 + h2)
+        return F.amp(v) * F.env_of(t, v) * y
+
+
+BLOCK = NotifyChirp

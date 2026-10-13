@@ -1,0 +1,97 @@
+{
+  "id": "notify_two_tone",
+  "family": "notification",
+  "kind": "source",
+  "description": "Two successive soft notes (fundamental plus third harmonic), interval in semitones, step time, second note level. Notifications, message received, doorbells. (12 October 2026)",
+  "tags": [
+    "tonal",
+    "notification",
+    "ui",
+    "two-tone",
+    "chime",
+    "doorbell"
+  ],
+  "sources": [
+    {
+      "what": "additive notes",
+      "url": null,
+      "licence": "original (derived from the published mathematics, no code copied)"
+    }
+  ],
+  "licence": "original",
+  "params": [
+    {
+      "name": "f1_hz",
+      "unit": "Hz",
+      "min": 200.0,
+      "max": 4000.0,
+      "default": 880.0,
+      "scale": "log",
+      "description": "first note"
+    },
+    {
+      "name": "interval_st",
+      "unit": "semitones",
+      "min": -12.0,
+      "max": 12.0,
+      "default": 5.0,
+      "scale": "lin",
+      "description": "second note relative to the first"
+    },
+    {
+      "name": "step_s",
+      "unit": "s",
+      "min": 0.03,
+      "max": 0.5,
+      "default": 0.12,
+      "scale": "log",
+      "description": "time between the two notes"
+    },
+    {
+      "name": "note_decay_s",
+      "unit": "s (T60)",
+      "min": 0.05,
+      "max": 2.0,
+      "default": 0.4,
+      "scale": "log",
+      "description": "decay of each note"
+    },
+    {
+      "name": "h3_db",
+      "unit": "dB",
+      "min": -60.0,
+      "max": -6.0,
+      "default": -20.0,
+      "scale": "lin",
+      "description": "third harmonic level"
+    },
+    {
+      "name": "note2_db",
+      "unit": "dB",
+      "min": -12.0,
+      "max": 6.0,
+      "default": 0.0,
+      "scale": "lin",
+      "description": "second note level relative"
+    },
+    {
+      "name": "amp_db",
+      "unit": "dBFS",
+      "min": -60.0,
+      "max": 0.0,
+      "default": -12.0,
+      "scale": "lin",
+      "description": "peak level"
+    },
+    {
+      "name": "onset_s",
+      "unit": "s",
+      "min": 0.0,
+      "max": 0.25,
+      "default": 0.02,
+      "scale": "lin",
+      "description": "start time in the window"
+    }
+  ],
+  "date": "12 October 2026"
+}

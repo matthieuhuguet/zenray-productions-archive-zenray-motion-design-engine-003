@@ -1,0 +1,150 @@
+# 12 October 2026, 18:00 CEST: reproduce a full-frame backdrop look of a shot with a shader-bank composition, keyframed.
+# Composition (editable layers): gradient_stops6 (angle, 6 colours, stop widths) + vignette_radial (multiply)
+# + grain_film (add, measured strength). Fit per keyframe on the numpy twins at FIT_W x FIT_H by least squares with
+# a robust mask: pixels that a smooth backdrop cannot explain (device, hand, text) are excluded by residual > K x MAD,
+# re-fit twice. Then every frame interpolates the keyframe parameters and is rendered by the GLSL (bank batch), and a
+# side-by-side review video (reference | shader) is written. The reference stays in the local cache; the review video
+# is written next to it, never in the archived workshop.
+# Usage: python -I Scripts/ReproduceBackdrop.py --slug onekey-pro-2 --start 19.6 --end 22.57 --motion <dir> [--keys 6]
+from __future__ import annotations
+
+import argparse, glob, json, subprocess, sys
+from concurrent.futures import ProcessPoolExecutor
+from pathlib import Path
+
+import numpy as np
+from scipy.optimize import least_squares
+
+ENGINE = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ENGINE))
+from zrmd import settings  # noqa: E402
+from zrmd import versions  # noqa: E402
+from zrmd.media import read_frames  # noqa: E402
+from zrmd.shaders import bank, compose  # noqa: E402
+
+FIT_W, FIT_H, OUT_W, OUT_H, FPS, K_MAD = 96, 54, 960, 540, 60, 3.0
+# 12 October 2026, 18:55: smoothness priors of a backdrop (it stays smooth behind the occluders the mask ignores):
+# minimum stop width and minimum vignette falloff; without them the fit hid a sharp wedge behind the device.
+W_MIN, V_FALL_MIN = 0.08, 0.3
+ASPECT = 16 / 9
+# 12 October 2026: parameter vector (name, lo, hi, start).
+P = [("angle", -180, 180, 0.0)] + [(f"c{i}_{ch}", 0, 1, 0.3) for i in range(6) for ch in "rgb"] + \
+    [("wa0", W_MIN, 1, 0.2), ("wa1", W_MIN, 1, 0.2), ("wa2", W_MIN, 1, 0.2), ("wb0", W_MIN, 1, 0.2), ("wb1", W_MIN, 1, 0.2),
+     ("vx", -0.5, 1.5, 0.3), ("vy", -0.5, 1.5, 0.5), ("vin", 0.0, 1.5, 0.3), ("vfall", V_FALL_MIN, 2.0, 0.8), ("vamt", 0.0, 1.0, 0.4)]
+NAMES = [p[0] for p in P]; LO = np.array([p[1] for p in P], float); HI = np.array([p[2] for p in P], float)
+
+
+def layers(x, grain=0.0, frame=0):
+    s = dict(zip(NAMES, x))
+    g = {"angle": s["angle"], "wa": [s["wa0"], s["wa1"], s["wa2"]], "wb": [s["wb0"], s["wb1"]]}
+    for i in range(6):
+        g[f"c{i}"] = [s[f"c{i}_r"], s[f"c{i}_g"], s[f"c{i}_b"]]
+    L = [{"block": "gradient_stops6", "params": g},
+         {"block": "vignette_radial", "blend": "multiply", "params": {"center": [s["vx"], s["vy"]], "inner": s["vin"],
+          "outer": s["vin"] + s["vfall"], "amount": s["vamt"], "tint": [0, 0, 0], "aspect": ASPECT}}]
+    if grain > 0:
+        L.append({"block": "grain_film", "blend": "add", "params": {"base": [0, 0, 0], "amount": grain, "density": 500.0,
+                  "frame": float(frame), "chroma": 0.0, "response": 0.5, "seed": 7.0, "aspect": ASPECT}})
+    return L
+
+
+def start_from(target):
+    # 12 October 2026, 18:15: colour starts from the reference itself, 6 samples of the mean profile along x (angle 0).
+    x0 = np.array([p[3] for p in P], float)
+    prof = target.mean(axis=0)  # W x 3
+    for i in range(6):
+        c = prof[int(round(i * (prof.shape[0] - 1) / 5))] / 255.0
+        for j, ch in enumerate("rgb"):
+            x0[NAMES.index(f"c{i}_{ch}")] = np.clip(c[j], 0.001, 0.999)
+    x0[NAMES.index("vamt")] = 0.05
+    return x0
+
+
+def fit_one(args):
+    target, x0 = args
+    # 12 October 2026, 18:40: warm start from the previous keyframe when given (temporal continuity), else from the image.
+    x0 = start_from(target) if x0 is None else np.asarray(x0, float)
+    mask = np.ones(target.shape[:2])
+    best = None
+    for _ in range(3):  # robust re-weighting
+        f = lambda x: ((compose.evaluate(layers(x), FIT_W, FIT_H) - target) / 255.0 * mask[..., None]).ravel()
+        starts = [x0] if (best is not None or args[1] is not None) else [x0] + [np.r_[a, x0[1:]] for a in (-90, 90, 180, 45, -45)]
+        res = [least_squares(f, np.clip(s0, LO + 1e-6, HI - 1e-6), bounds=(LO, HI), max_nfev=300, x_scale="jac", diff_step=1e-3) for s0 in starts]
+        r = min(res, key=lambda q: q.cost); x0 = r.x; best = r.x
+        resid = np.abs(compose.evaluate(layers(r.x), FIT_W, FIT_H) - target).max(axis=2)
+        mad = np.median(np.abs(resid - np.median(resid))) + 1e-6
+        mask = (resid < np.median(resid) + K_MAD * 1.4826 * mad).astype(float)
+    img = compose.evaluate(layers(best), FIT_W, FIT_H)
+    rms = float(np.sqrt(((img - target) ** 2 * mask[..., None]).sum() / (mask.sum() * 3)))
+    return best, rms, float(mask.mean())
+
+
+def main() -> int:
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--slug", required=True); ap.add_argument("--start", type=float, required=True)
+    ap.add_argument("--end", type=float, required=True); ap.add_argument("--motion", required=True)
+    ap.add_argument("--keys", type=int, default=6)
+    a = ap.parse_args()
+    cache = Path("/Users/zenray/.claude/tmp/tmp-zenray-motion-design-refcache") / a.slug
+    # 12 October 2026: the reference by its recorded name, never a glob (review videos live in the same cache).
+    meta = json.loads((settings.path("workshop") / "references" / a.slug / "reference.json").read_text(encoding="utf-8"))
+    video = str(cache / meta["file_name"])
+    dur = a.end - a.start; n = int(round(dur * FPS))
+    small = read_frames(video, FIT_W, FIT_H, start=a.start, duration=dur).astype(float)
+    kf = np.linspace(0, len(small) - 1, a.keys).round().astype(int)
+    # grain strength from the reference: high-pass std on the robust backdrop, measured once at full size on the middle frame
+    mid = read_frames(video, 960, 540, start=a.start + dur / 2, duration=1 / FPS)[0].astype(float).mean(2)
+    import cv2
+    hp = mid - cv2.GaussianBlur(mid, (0, 0), 2.0)
+    grain = float(np.clip(np.median(np.abs(hp)) * 1.4826 / 255.0 * 2.0, 0, 0.2))
+    # 12 October 2026, 18:40: keyframes fitted in sequence, each warm-started from the previous one, so neighbouring
+    # keyframes share one solution branch and their interpolation stays a backdrop; the first keyframe gets the
+    # multi-start search. Angle unwrapped before interpolation.
+    fits, prev = [], None
+    for k in kf:
+        fits.append(fit_one((small[k], prev)))
+        prev = fits[-1][0]
+    for k, (x, r, m) in zip(kf, fits):
+        print(f"key frame {k}: masked rms {r:.2f} levels, backdrop share {m:.2f}", flush=True)
+    X = np.array([f[0] for f in fits])
+    X[:, 0] = np.degrees(np.unwrap(np.radians(X[:, 0])))
+    per_frame = [np.array([np.interp(i, kf, X[:, j]) for j in range(len(NAMES))]) for i in range(n)]
+    params = {"schema": "zrmd/motion@1", "recipe": "shader-backdrop", "canvas": {"width": OUT_W, "height": OUT_H, "fps": FPS, "frames": n},
+              "grain": grain, "keyframes": [{"frame": int(k), "layers": layers(x, grain, int(k))} for k, x in zip(kf, X)]}
+    motion = Path(a.motion)
+    vdir = versions.create_version(motion, params, note="shader-bank backdrop, keyframed")
+    m = versions.read_json(motion / "motion.json", {}) or {}
+    m.update({"id": motion.name, "title": "Studio backdrop, shader", "recipe": "shader-backdrop",
+              "source": {"slug": a.slug, "start": a.start, "end": a.end}, "tags": ["shader", "backdrop", a.slug]})
+    versions.write_json(motion / "motion.json", m)
+    frames = bank.render_glsl_batch([layers(x, grain, i) for i, x in enumerate(per_frame)], OUT_W, OUT_H)
+    fdir = vdir / "frames"; fdir.mkdir(exist_ok=True)
+    from PIL import Image
+    for i, f in enumerate(frames):
+        Image.fromarray(f).save(fdir / f"{i:04d}.png")
+    subprocess.run(["ffmpeg", "-v", "error", "-y", "-framerate", str(FPS), "-i", str(fdir / "%04d.png"), "-c:v", "libx264",
+                    "-pix_fmt", "yuv420p", "-crf", "16", str(vdir / "render.mp4")], check=True)
+    (cache / "reviews").mkdir(exist_ok=True)
+    review = cache / "reviews" / f"{motion.name}-{vdir.name}.mp4"
+    subprocess.run(["ffmpeg", "-v", "error", "-y", "-ss", f"{a.start:.3f}", "-t", f"{dur:.3f}", "-i", video, "-i", str(vdir / "render.mp4"),
+                    "-filter_complex", f"[0:v]scale={OUT_W}:{OUT_H},fps={FPS}[a];[1:v]scale={OUT_W}:{OUT_H}[b];[a][b]hstack=inputs=2[v]",
+                    "-map", "[v]", "-an", "-c:v", "libx264", "-pix_fmt", "yuv420p", "-crf", "18", str(review)], check=True)
+    ref = read_frames(video, FIT_W, FIT_H, start=a.start, duration=dur).astype(float)
+    out = read_frames(str(vdir / "render.mp4"), FIT_W, FIT_H, start=0, duration=dur).astype(float)
+    # 12 October 2026: every frame, not only keyframes: robust masked RMS (pixels a smooth backdrop explains).
+    per = []
+    for i in range(min(len(ref), len(out))):
+        d = np.abs(out[i] - ref[i]).max(axis=2); mad = np.median(np.abs(d - np.median(d))) + 1e-6
+        m = d < np.median(d) + K_MAD * 1.4826 * mad
+        per.append(float(np.sqrt(((out[i] - ref[i]) ** 2)[m].mean())))
+    rep = {"date": "12 October 2026", "frame_masked_rms_median": round(float(np.median(per)), 2),
+           "frame_masked_rms_p90": round(float(np.percentile(per, 90)), 2), "frame_masked_rms": [round(v, 2) for v in per],
+           "keys": [int(k) for k in kf], "key_masked_rms": [round(f[1], 2) for f in fits],
+           "backdrop_share": [round(f[2], 2) for f in fits], "grain": grain, "review": str(review)}
+    (vdir / "fidelity.json").write_text(json.dumps(rep, indent=1) + "\n")
+    print(json.dumps({"version": vdir.name, **rep}))
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

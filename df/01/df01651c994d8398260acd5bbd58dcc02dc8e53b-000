@@ -1,0 +1,71 @@
+// 13 October 2026: links the engine and the workshop to the Assets project zenray-motion-design WITHOUT loading the
+// shared daemon (com.zenray.assets stays unloaded until Matthieu asks): the service library runs in this process, the same
+// way the Japanese project does its recovery pass. The definition lives in datasets/assets-sources.json (HDA: one place).
+// Usage: node Scripts/AssetsLink.mjs register | inventory | archive [--source=<id>]
+// FR : relie le moteur et l'atelier au projet Assets sans recharger le demon ; la definition est dans datasets/assets-sources.json.
+import {readFile, readdir} from 'node:fs/promises'
+import {createAssetsService, isExcludedSourcePath} from '/Users/zenray/Create/Build/Productions/GithubProductions/ZenRayProgress/scripts/AssetsService.mjs'
+
+// 13 October 2026: the Assets scope rules have no extension filter and no globs (exclude = exact path, prefix or folder name),
+// so a source that must leave audio out is expanded here into an explicit include list: whole folders by prefix when nothing
+// banned lives below them, individual files otherwise. Re-run `register` after new folders appear (the orchestrator does).
+// FR : le service n'a ni glob ni filtre d'extension : la definition (excludeExtensions) est developpee en liste include explicite.
+async function expandInclude(source, config) {
+  const banned = (source.excludeExtensions || []).map(e => e.toLowerCase())
+  const walk = async (dir, prefix) => {
+    const parts = []
+    let clean = true
+    for (const entry of (await readdir(dir, {withFileTypes: true})).sort((a, b) => a.name.localeCompare(b.name))) {
+      const raw = prefix ? `${prefix}/${entry.name}` : entry.name
+      if (isExcludedSourcePath(raw, source, config) || entry.isSymbolicLink()) continue
+      if (entry.isDirectory()) {
+        const sub = await walk(`${dir}/${entry.name}`, raw)
+        if (!sub.clean) clean = false
+        parts.push(...sub.parts)
+      } else if (entry.isFile()) {
+        if (banned.some(e => entry.name.toLowerCase().endsWith(e))) clean = false
+        else parts.push(raw)
+      }
+    }
+    return clean && prefix ? {clean: true, parts: [prefix]} : {clean, parts}
+  }
+  return (await walk(source.localPath, '')).parts
+}
+
+const here = new URL('..', import.meta.url).pathname
+const def = JSON.parse(await readFile(`${here}datasets/assets-sources.json`, 'utf8'))
+const cmd = process.argv[2] || 'inventory'
+const only = process.argv.find(a => a.startsWith('--source='))?.slice(9)
+const service = await createAssetsService()
+try {
+  const project = service.project(def.projectId)
+  if (cmd === 'register') {
+    const keep = new Map((project.sources || []).map(s => [s.id, s]))
+    const sources = []
+    for (const {excludeExtensions, ...s} of def.sources) {
+      const include = excludeExtensions ? await expandInclude({...s, excludeExtensions}, service.config) : s.include
+      sources.push({...(keep.get(s.id) || {}), ...s, ...(include ? {include} : {})})
+    }
+    await service.register({...project, sources})
+    const after = service.project(def.projectId)
+    console.log(JSON.stringify({registered: after.sources.map(s => ({id: s.id, path: s.localPath, exclude: (s.exclude || []).length, include: (s.include || []).length}))}))
+  } else if (cmd === 'inventory') {
+    await service.inventory(def.projectId)
+    const files = service.state(def.projectId).inventory.localFiles
+    const by = {}
+    for (const f of files) { const b = (by[f.sourceId] ||= {files: 0, bytes: 0}); b.files++; b.bytes += f.size || 0 }
+    console.log(JSON.stringify(Object.fromEntries(Object.entries(by).map(([k, v]) => [k, {files: v.files, MB: Math.round(v.bytes / 1048576)}]))))
+  } else if (cmd === 'archive') {
+    await service.inventory(def.projectId)
+    let fileIds
+    if (only) fileIds = service.state(def.projectId).inventory.localFiles.filter(f => f.sourceId === only).map(f => f.id)
+    const started = await service.request('archive', {projectId: def.projectId, ...(fileIds ? {fileIds} : {})})
+    console.log(JSON.stringify({started}))
+    const timer = setInterval(() => { const j = service.jobs.get(started.jobId); console.log(JSON.stringify({state: j?.state, progress: j?.progress})) }, 30000)
+    try { await service.queue } finally { clearInterval(timer) }
+    const j = service.jobs.get(started.jobId)
+    console.log(JSON.stringify({final: {state: j?.state, error: j?.error, progress: j?.progress}}))
+  } else {
+    throw new Error(`unknown command ${cmd}`)
+  }
+} finally { await service.close() }

@@ -1,0 +1,743 @@
+#!/usr/bin/env python3
+# 12 October 2026: task M2, resynthesis of the music benchmark (score.json of M1) with the procedural sound bank.
+#   ResynthMusic.py build --stage bank|own|fx|bus [--from V_NNN] [--set a.b=json]   fit or reuse, render, score
+#   ResynthMusic.py render --params FILE [--note TEXT]                               pure render of a params.json
+#   ResynthMusic.py variation --from V_NNN [--bpm 96 --transpose 2 --voice bass --timbre '{"k": v}']
+#   ResynthMusic.py baseline                                                         M1 sine render, same scorer
+#   ResynthMusic.py build --stage sms --from V_005 [--roles kick,bass]               12 October 2026: measured timbre
+#                                                    models (zrmd/audio/sms.py) for every role, then fx and bus
+#   ResynthMusic.py rescore --versions V_003,V_004                                   stable scores of old versions
+#   ResynthMusic.py build --stage dev --from V_025                                   12 October 2026 (M3): per-event timbre
+#                                                    deviation (zrmd/audio/eventdev.py), then fx and bus
+#   ResynthMusic.py build --stage assemble --from V_034 [--stems drums=V_025,bass=V_022] 12 October 2026 (MI-assemble):
+#                                                    the best stem-iter version of each stem (auto when --stems is
+#                                                    absent) rendered from its own params (zrmd/audio/stems/assemble.py,
+#                                                    params key stemIter), then per-stem trims and the mix bus refitted
+# Every run writes the next free V_NNN in the music bench (never overwrites): params.json (the procedural controls),
+# score.json (the score used), stems/*.wav, mix.wav, scores.json, fits.json when fits ran, meta.json (private: true).
+# Stages: bank = dfit on ready bank blocks only, dry; own = bank plus the M2 instruments, reverb fitted with the note;
+# fx = per-section equaliser, gain riding, stereo per stem; bus = mix bus (equaliser, compressor, loudness, limiter).
+# FR : resynthese du banc musical ; chaque execution ecrit une version V_NNN neuve et privee.
+import os
+
+for _k in ("OMP_NUM_THREADS", "VECLIB_MAXIMUM_THREADS", "OPENBLAS_NUM_THREADS", "MKL_NUM_THREADS"):
+    os.environ.setdefault(_k, "1")
+import argparse
+import copy
+import json
+import re
+import shutil
+import sys
+import time
+import warnings
+from concurrent.futures import ProcessPoolExecutor
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(ROOT))
+warnings.filterwarnings("ignore")
+
+import numpy as np  # noqa: E402
+
+from zrmd.audio import loudness, ploss  # noqa: E402
+from zrmd.audio import resynth as RS  # noqa: E402
+
+STAGES = {
+    "bank": {"refit": True, "useBank": True, "useOwn": False, "reverb": False, "eq": False, "automation": False, "stereo": False, "mixBus": False},
+    "own": {"refit": True, "useBank": True, "useOwn": True, "reverb": True, "eq": False, "automation": False, "stereo": False, "mixBus": False},
+    "fx": {"refit": False, "eq": True, "automation": True, "stereo": True, "mixBus": False},
+    "bus": {"refit": False, "eq": True, "automation": True, "stereo": True, "mixBus": True},
+    # 12 October 2026: phrase = timbres refined jointly on whole bars (resynth.phrase_job), then fx and bus re-measured.
+    "phrase": {"refit": False, "phrase": True, "eq": True, "automation": True, "stereo": True, "mixBus": True},
+    # 12 October 2026: sms = measured timbre models (sms.py) replace the roles of --roles (all when absent), then fx and bus.
+    "sms": {"refit": False, "sms": True, "eq": True, "automation": True, "stereo": True, "mixBus": True},
+    # 12 October 2026 (M3): dev = per-event timbre deviation (zrmd/audio/eventdev.py) on the base version's score and
+    # measured models, then fx and bus re-measured.
+    "dev": {"refit": False, "dev": True, "eq": True, "automation": True, "stereo": True, "mixBus": True},
+    # 12 October 2026 (M3 resume): gap = drum hits missed by the transcription added (zrmd/audio/gapfill.py), then the
+    # per-event deviation (pass --set eventDev.resume=true to keep the base tables), then fx and bus.
+    "gap": {"refit": False, "gap": True, "dev": True, "eq": True, "automation": True, "stereo": True, "mixBus": True},
+    # 12 October 2026 (M3 critic): retag = drum hits moved between classes by measured pitch (zrmd/audio/retag.py, kick
+    # to tom) on the base version's score, then the drum timbre models re-measured (sms on retag.smsRoles, or --roles),
+    # the per-event deviation (pass --set eventDev.resume=true), fx and bus.
+    "retag": {"refit": False, "retag": True, "sms": True, "dev": True, "eq": True, "automation": True, "stereo": True, "mixBus": True},
+    # 12 October 2026 (MI-assemble): stems from stem-iter versions (stemIter), base stem fx kept, mix bus refitted.
+    "assemble": {"refit": False, "stemIter": True, "eq": False, "automation": False, "stereo": False, "mixBus": True},
+}
+
+# 12 October 2026 (MI-assemble): interface of the assemble stage. stemIterDir = folder of the stem iterations inside the
+# bench; copyDir = where a version keeps its own copy of each stem's params; trimGridDb and trimSweeps = per-stem bus
+# trims tried by coordinate descent on the mix critic (0 dB is always a candidate, so a trim never lowers the mix score
+# under the eq it was fitted with); trimWorkers = processes. FR : interface de l'etape d'assemblage.
+ASSEMBLE = {"stemIterDir": "stem-iter", "copyDir": "stem-iter", "trimGridDb": [-1.5, -1.0, -0.5, -0.25, 0.25, 0.5, 1.0, 1.5],
+            "trimSweeps": 2, "trimWorkers": 4, "eqPasses": 2,
+            # 12 October 2026: busGain lets the bus output gain leave the reference loudness when the critic gains
+            # (the loudness of the kept bus is reported in scores.json mix.lufs). FR : gain de sortie libre en option.
+            "busGain": True}
+
+
+def run_dev(prm, P, ref, score):
+    """12 October 2026 (M3): per-event deviation tables, one process per stem; written into the version's score.
+    FR : ecarts de timbre par evenement, un processus par piste."""
+    from zrmd.audio import eventdev
+    score = copy.deepcopy(score)
+    events = RS.role_events(score)
+    di = {}
+    for i, h in enumerate(score["drums"]):
+        di.setdefault(h["class"], []).append(i)
+    for role, evs in events.items():
+        for j, e in enumerate(evs):
+            e["i"] = di[role][j] if role in di else j
+    order = sorted(prm["voices"])
+    jobs = []
+    for stem in P["eventDev"]["stems"]:
+        rs = [r for r, sp in prm["voices"].items() if P["roles"][r]["stem"] == stem and sp.get("engine") == "sms" and not sp.get("mute") and events.get(r)]
+        if rs:
+            jobs.append({"stem": stem, "P": P, "x": RS.mono(ref["stems"][stem]), "n": prm["lengthSamples"],
+                         "events": {r: events[r] for r in rs}, "specs": {r: prm["voices"][r] for r in rs},
+                         "seeds": {r: P["render"]["seedBase"] + order.index(r) for r in rs}})
+    with ProcessPoolExecutor(max_workers=max(1, len(jobs))) as ex:
+        res = list(ex.map(eventdev.fit_stem, jobs))
+    info, cells = {}, 0
+    for r in res:
+        info[r["stem"]] = r["history"]
+        for role, rows in r["events"].items():
+            for e in rows:
+                if not e["dev"]:
+                    continue
+                tgt = score["drums"][e["i"]] if P["roles"][role]["kind"] == "drum" else score["voices"][role]["notes"][e["i"]]
+                tgt["dev"] = e["dev"]
+                cells += int(np.size(e["dev"]["db"]))
+        log(f"dev {r['stem']}: mean |dB| per round {[h['meanAbsDb'] for h in r['history']]}")
+    score["eventDevBy"] = "zrmd.audio.eventdev (12 October 2026)"
+    return prm, score, {"eventDev": info, "numbersFromReference": cells}
+
+
+def run_phrase(prm, P, ref, score):
+    """Joint timbre refinement per stem on the bars of phrase.windows. FR : affinage conjoint par piste."""
+    sr = P["sampleRate"]
+    bars = {b["index"]: b for b in score["tempo"]["bars"]}
+    events = RS.role_events(score)
+    # 12 October 2026: index of every event in the score, so re-measured levels go back into the version's score.
+    di = {}
+    for i, h in enumerate(score["drums"]):
+        di.setdefault(h["class"], []).append(i)
+    for role, evs in events.items():
+        for j, e in enumerate(evs):
+            e["i"] = di[role][j] if role in di else j
+    jobs = []
+    for stem in ("drums", "bass", "other", "vocals"):  # 13 October 2026: + vocals
+        specs = {r: s for r, s in prm["voices"].items() if P["roles"][r]["stem"] == stem and not s.get("mute") and s.get("engine") != "sms"}
+        if not specs:
+            continue
+        wins = []
+        for f, l in P["phrase"]["windows"]:
+            if f not in bars or l not in bars:
+                continue
+            a, b = bars[f]["start"], bars[l]["end"]
+            ev = {r: [e for e in events.get(r, []) if a - P["phrase"]["preRollS"] <= e["t"] < b] for r in specs}
+            wins.append({"a": a, "events": ev, "target": RS.cut(RS.mono(ref["stems"][stem]), sr, a, b)})
+        jobs.append({"stem": stem, "specs": specs, "windows": wins, "P": P, "threads": 5})
+    with ProcessPoolExecutor(max_workers=len(jobs)) as ex:
+        res = list(ex.map(RS.phrase_job, jobs))
+    info = {}
+    for r in res:
+        prm["voices"].update(r["specs"])
+        info[r["stem"]] = {"startScore": round(ploss.score_from_e2(r["curve"][0]), 4), "bestScore": round(ploss.score_from_e2(min(r["curve"])), 4), "curve": r["curve"]}
+        log(f"phrase {r['stem']}: window ploss {info[r['stem']]['startScore']} -> {info[r['stem']]['bestScore']}")
+    return prm, info
+
+
+def run_sms(prm, P, ref, score, only):
+    """12 October 2026: measured timbre models (zrmd/audio/sms.py) for the roles in `only` (all when empty): onset
+    times refined on the stems (a new score.json in the version), one analysis plus calibration process per stem.
+    FR : modeles de timbre mesures, un processus par piste."""
+    from zrmd.audio import sms
+    sr = P["sampleRate"]
+    S = P["sms"]
+    score = copy.deepcopy(score)
+    rf = S["refine"]
+    drums_m = RS.mono(ref["stems"]["drums"])
+    if rf["drums"]:
+        ts = sms.refine_times(drums_m, sr, [h["t"] for h in score["drums"]], rf, None)
+        for h, t in zip(score["drums"], ts):
+            h["tScore"], h["t"] = h["t"], t
+    for v, band in rf["tonalBands"].items():
+        notes = score["voices"].get(v, {}).get("notes", [])
+        ts = sms.refine_times(RS.mono(ref["stems"][P["roles"][v]["stem"]]), sr, [n_["t"] for n_ in notes], rf, tuple(band))
+        for n_, t in zip(notes, ts):
+            n_["tScore"], n_["t"] = n_["t"], t
+    score["refinedBy"] = "zrmd.audio.sms.refine_times (12 October 2026)"
+    events = RS.role_events(score)
+    # 12 October 2026: index of every event in the score, so re-measured levels go back into the version's score.
+    di = {}
+    for i, h in enumerate(score["drums"]):
+        di.setdefault(h["class"], []).append(i)
+    for role, evs in events.items():
+        for j, e in enumerate(evs):
+            e["i"] = di[role][j] if role in di else j
+    jobs = []
+    for stem in ("drums", "bass", "other", "vocals"):  # 13 October 2026: + vocals
+        rs = [r for r in RS.roles(P) if P["roles"][r]["stem"] == stem and events.get(r) and (not only or r in only)]
+        if rs:
+            jobs.append({"stem": stem, "P": P, "x": RS.mono(ref["stems"][stem]), "events": {r: events[r] for r in rs},
+                         "kinds": {r: P["roles"][r]["kind"] for r in rs}})
+    with ProcessPoolExecutor(max_workers=len(jobs)) as ex:
+        res = list(ex.map(sms.analyse_stem, jobs))
+    info = {}
+    for r in res:
+        prm["voices"].update(r["specs"])
+        info[r["stem"]] = r["calibration"]
+        for role, rows in r["levels"].items():
+            for e in rows:
+                tgt = score["drums"][e["i"]] if P["roles"][role]["kind"] == "drum" else score["voices"][role]["notes"][e["i"]]
+                if abs(tgt["levelDb"] - e["levelDb"]) > 1e-9:
+                    tgt.setdefault("levelDbScore", tgt["levelDb"])
+                    tgt["levelDb"] = round(e["levelDb"], 3)
+        log(f"sms {r['stem']}: calibration mean |dB| per round {r['calibration']}")
+    return prm, score, {"sms": info}
+
+
+def parse_set(items):
+    over = {}
+    for item in items or []:
+        key, _, raw = item.partition("=")
+        try:
+            value = json.loads(raw)
+        except json.JSONDecodeError:
+            value = raw
+        node = over
+        parts = key.split(".")
+        for part in parts[:-1]:
+            node = node.setdefault(part, {})
+        node[parts[-1]] = value
+    return over
+
+
+def next_version(bench: Path) -> Path:
+    # 12 October 2026: two runs finishing together each get their own version (mkdir is the lock, never exist_ok).
+    while True:
+        nums = [int(m.group(1)) for p in bench.iterdir() if (m := re.fullmatch(r"V_(\d{3})", p.name))]
+        d = bench / f"V_{(max(nums) + 1 if nums else 1):03d}"
+        try:
+            d.mkdir()
+            return d
+        except FileExistsError:
+            continue
+
+
+def log(msg):
+    print(f"[{time.strftime('%H:%M:%S')}] {msg}", flush=True)
+
+
+# ---------------------------------------------------------------- stems from stem-iter versions (12 October 2026, MI-assemble)
+
+def stem_iter_dir(prm, base_dir, stem, P):
+    """The folder holding a stem's params: the version's own copy when present, else the bench's stem-iter folder."""
+    e = prm["stemIter"][stem]
+    own = Path(base_dir) / ASSEMBLE["copyDir"] / stem if base_dir else None
+    if own is not None and (own / "params.json").exists():
+        return own
+    return Path(P["paths"]["bench"]) / ASSEMBLE["stemIterDir"] / stem / e["version"]
+
+
+def render_full(prm, score, P, stages=None, base_dir=None):
+    """resynth.render, then every stem listed in prm.stemIter replaced by its stem-iter render and the bus re-applied.
+    FR : rendu complet, avec les pistes des versions stem-iter."""
+    st = {"mixBus": True, **(stages or {})}
+    # 12 October 2026: when every stem comes from stem-iter, the base render is skipped (it would be discarded).
+    if set(prm.get("stemIter") or {}) >= set(RS.STEMS):
+        out = {"stems": {}, "sr": P["sampleRate"], "score": score}
+    else:
+        out = RS.render(prm, score, P, stages={**st, "mixBus": False})
+    if prm.get("stemIter"):
+        from zrmd.audio.stems import assemble as AS
+        bench, sr = Path(P["paths"]["bench"]), P["sampleRate"]
+        for stem in prm["stemIter"]:
+            # 12 October 2026: on stderr, so a caller printing JSON on stdout (VerifyResynth --json) stays parseable.
+            print(f"[{time.strftime('%H:%M:%S')}] stem {stem} from {prm['stemIter'][stem]['version']}", file=sys.stderr, flush=True)
+            out["stems"][stem] = AS.render_stem(stem, stem_iter_dir(prm, base_dir, stem, P), bench, sr, prm["lengthSamples"])
+    k = score["tempo"]["bpm"] / float(prm["tempo"]["bpm"])
+    out["mix"] = RS.apply_mix_bus(out["stems"], prm.get("mixBus") if st["mixBus"] else None, P["sampleRate"], P, k, score["tempo"]["t0"])
+    return out
+
+
+def best_stem_versions(P, picks):
+    """Best stem-iter version per stem by its stored tfBands (scores.json), unless picked; None keeps the base stem."""
+    root = Path(P["paths"]["bench"]) / ASSEMBLE["stemIterDir"]
+    out = {}
+    for stem in RS.STEMS:
+        if stem in picks:
+            out[stem] = picks[stem]
+            continue
+        best, bv = -1.0, None
+        for d in sorted((root / stem).glob("V_[0-9][0-9][0-9]")):
+            try:
+                sc = json.loads((d / "scores.json").read_text())
+            except (OSError, json.JSONDecodeError):
+                continue
+            v = sc.get("tfBands", (sc.get(stem) or {}).get("tfBands"))
+            if v is not None and v > best:
+                best, bv = v, d.name
+        out[stem] = bv
+    return {k: v for k, v in out.items() if v}
+
+
+def trim_job(args):
+    stems, bus, ref_mid, sr, P = args
+    sys.path.insert(0, str(ROOT / "Scripts"))
+    import MusicCritic as MC
+    y = RS.apply_mix_bus(stems, bus, sr, P)
+    return MC.compare(ref_mid, RS.mono(y)[: len(ref_mid)], sr)["score"]
+
+
+def relufs(bus, stems, ref, P):
+    """12 October 2026: re-match the bus output gain to the reference integrated loudness (mixBus.lufsPasses passes)."""
+    sr = P["sampleRate"]
+    bus = copy.deepcopy(bus)
+    ref_lufs = loudness.integrated(ref["mix"], sr)
+    for _ in range(P["mixBus"].get("lufsPasses", 1)):
+        y = RS.apply_mix_bus(stems, bus, sr, P)
+        bus["gainDb"] = round(bus["gainDb"] + ref_lufs - loudness.integrated(y, sr), 2)
+    return bus
+
+
+def fit_stem_trims(prm, P, ref, stems, with_bus_gain=False):
+    """Per-stem bus trims by coordinate descent on the M3 mix critic, the current bus (eq, compressor, gain) kept.
+    12 October 2026: with_bus_gain adds the bus output gain as a coordinate ("_bus"): the -1.05 dBTP ceiling limits
+    our mix by about 2.4 LU at the reference loudness, which the critic penalises (V_036 probe: -1.5 dB scores 99.03
+    against 98.84 at matched loudness). FR : niveaux par piste, et gain de sortie du bus en option."""
+    sr, ref_mid = P["sampleRate"], RS.mono(ref["mix"])
+    bus = copy.deepcopy(prm["mixBus"])
+    gains = dict(bus.get("stemGainsDb") or {})
+    coords = list(RS.STEMS) + (["_bus"] if with_bus_gain else [])
+
+    def make(g, s, c):
+        if s == "_bus":
+            return {**bus, "stemGainsDb": dict(g), "gainDb": c}
+        return {**bus, "stemGainsDb": {**g, s: c}}
+
+    hist = []
+    with ProcessPoolExecutor(max_workers=ASSEMBLE["trimWorkers"]) as ex:
+        cur = trim_job((stems, {**bus, "stemGainsDb": gains}, ref_mid, sr, P))
+        hist.append({"gains": dict(gains), "gainDb": bus["gainDb"], "mixTfBands": round(cur, 4)})
+        for _ in range(ASSEMBLE["trimSweeps"]):
+            moved = False
+            for s in coords:
+                now = bus["gainDb"] if s == "_bus" else gains.get(s, 0.0)
+                cands = [round(now + g, 3) for g in ASSEMBLE["trimGridDb"]]
+                res = list(ex.map(trim_job, [(stems, make(gains, s, c), ref_mid, sr, P) for c in cands]))
+                i = int(np.argmax(res))
+                if res[i] > cur + 1e-4:
+                    if s == "_bus":
+                        bus["gainDb"] = cands[i]
+                    else:
+                        gains[s] = cands[i]
+                    cur, moved = res[i], True
+                    hist.append({"gains": dict(gains), "gainDb": bus["gainDb"], "mixTfBands": round(cur, 4)})
+                    log(f"trim {s} {cands[i]:+.2f} dB -> mix {cur:.3f}")
+            if not moved:
+                break
+    return gains, hist, {**bus, "stemGainsDb": gains}
+
+
+# ---------------------------------------------------------------- fits (12 October 2026)
+
+def cross_job(args):
+    """Render one fitted timbre on every exemplar of its role and score each window with ploss."""
+    import torch
+    torch.set_num_threads(1)
+    fit, exs, targets, kind, P = args
+    RS.install(P)
+    sr = P["sampleRate"]
+    spec = RS.spec_from_fit(fit, exs[fit["ex"]], kind, P)
+    scores = []
+    for ev, tg in zip(exs, targets):
+        n = len(tg)
+        job = {"role": fit["role"], "spec": spec, "events": [{**ev, "t": ev["t"] - ev["start"]}], "n": n, "P": P}
+        _, y = RS.render_role_job(job)
+        scores.append(ploss.score(y, np.asarray(tg, np.float32), sr)["score"])
+    return {**{k: fit[k] for k in ("role", "block", "ex", "reverb", "score")}, "cross": [round(s, 3) for s in scores],
+            "crossMean": round(float(np.mean(scores)), 4), "spec": spec}
+
+
+def run_fits(P, ref, score, stage, log_rows):
+    sr = P["sampleRate"]
+    bk = RS.bank_ready()
+    log(f"bank: {len(bk['ready'])} ready, {len(bk['pending'])} pending, {len(bk['failed'])} failed import")
+    events = RS.role_events(score)
+    stems_m = {k: RS.mono(ref["stems"][k]) for k in RS.STEMS}
+    jobs, ex_by_role, tg_by_role, cand_by_role = [], {}, {}, {}
+    for role, R in RS.roles(P).items():
+        if not events.get(role):
+            continue
+        exs = RS.pick_exemplars(role, events, P)
+        tgs = [RS.cut(stems_m[R["stem"]], sr, e["start"], e["end"]) for e in exs]
+        ex_by_role[role], tg_by_role[role] = exs, tgs
+        cands = RS.candidates(role, P, bk["ready"], stage["useBank"], stage["useOwn"])
+        cand_by_role[role] = cands
+        rev = P["fit"]["reverbBlocks"][0] if stage["reverb"] else None
+        for c in cands:
+            for i, (e, tg) in enumerate(zip(exs, tgs)):
+                jobs.append({"role": role, "block": c, "ex": i, "event": e, "kind": R["kind"], "target": tg, "seed": P["render"]["seedBase"],
+                             "reverb": rev, "P": P})
+    log(f"fits: {len(jobs)} jobs over {len(ex_by_role)} roles: " + ", ".join(f"{r}={c}" for r, c in cand_by_role.items()))
+    t0 = time.time()
+    fits = []
+    with ProcessPoolExecutor(max_workers=P["workers"]) as ex:
+        for res in ex.map(RS.fit_job, jobs):
+            fits.append(res)
+            if "skipped" not in res:
+                log(f"  fit {res['role']:<10} {res['block']:<20} ex{res['ex']} ploss {res['score']:7.3f} b1 {res['b1']} ({res['seconds']} s)")
+    log(f"fits done in {time.time() - t0:.0f} s")
+    ok = [f for f in fits if "skipped" not in f]
+    with ProcessPoolExecutor(max_workers=P["workers"]) as ex:
+        crosses = list(ex.map(cross_job, [(f, ex_by_role[f["role"]], tg_by_role[f["role"]], P["roles"][f["role"]]["kind"], P) for f in ok]))
+    voices, choice = {}, {}
+    for role in ex_by_role:
+        rows = [c for c in crosses if c["role"] == role]
+        if not rows:
+            continue
+        best = max(rows, key=lambda c: c["crossMean"])
+        voices[role] = best["spec"]
+        voices[role]["fit"]["crossMean"] = best["crossMean"]
+        choice[role] = {"chosen": best["block"], "exemplar": best["ex"], "crossMean": best["crossMean"],
+                        "table": [{k: c[k] for k in ("block", "ex", "score", "cross", "crossMean")} for c in sorted(rows, key=lambda c: -c["crossMean"])]}
+        log(f"choice {role:<10} -> {best['block']} (ex{best['ex']}, cross mean {best['crossMean']:.2f})")
+    return voices, {"bank": {"ready": sorted(bk["ready"]), "pending": bk["pending"], "failed": bk["failed"]},
+                    "exemplars": {r: [{k: e[k] for k in ("t", "levelDb", "overlap", "start", "end") if k in e} | ({"midi": e["midi"]} if "midi" in e else {}) for e in v] for r, v in ex_by_role.items()},
+                    "fits": [{k: f[k] for k in f if k != "params"} | ({"params": f["params"]} if "params" in f else {}) for f in fits],
+                    "choice": choice, "fitSeconds": round(time.time() - t0, 1)}
+
+
+# ---------------------------------------------------------------- measurements of fx and bus (12 October 2026)
+
+def comp_job(args):
+    import torch
+    torch.set_num_threads(1)
+    stems, bus, ref_mid, sr, P = args
+    y = RS.apply_mix_bus(stems, bus, sr, P)
+    return bus["compressor"], ploss.score(RS.mono(y)[: len(ref_mid)], ref_mid, sr)["score"]
+
+
+def fit_stem_fx(prm, P, ref, score, stage):
+    sr = P["sampleRate"]
+    dry = RS.render(prm, score, P, stages={"eq": False, "automation": False, "stereo": False, "mixBus": False, "residual": False})
+    spans = RS.fx_spans(score, P)
+    if stage.get("residual", P["residual"]["use"]):  # 12 October 2026: residual bed measured first, then the eq on dry + bed
+        for s in P["residual"]["stems"]:
+            prm["stemFx"].setdefault(s, {})["residual"] = RS.measure_residual(RS.mono(ref["stems"][s]), RS.mono(dry["stems"][s]), spans, sr, P,
+                                                                             P["residual"].get("sectionGateDb", {}).get(s))
+        dry = RS.render(prm, score, P, stages={"eq": False, "automation": False, "stereo": False, "mixBus": False})
+    for s in RS.STEMS:
+        fx = prm["stemFx"].setdefault(s, {})
+        if stage["eq"] and s != "vocals":
+            fx["eq"] = RS.measure_eq(RS.mono(ref["stems"][s]), RS.mono(dry["stems"][s]), spans, sr, P)
+        fx["automation"] = bool(stage["automation"])
+        if stage["stereo"]:
+            fx["stereo"] = RS.measure_stereo(ref["stems"][s], sr, P)
+    return prm
+
+
+def fit_mix_bus(prm, P, ref, score, stems=None, gains=None):
+    """12 October 2026 (MI-assemble): stems (already rendered) and gains (per-stem bus trims) are optional; without them
+    the behaviour is the M2 one (resynth.render, no trims). FR : bus de mix, pistes et niveaux optionnels."""
+    sr = P["sampleRate"]
+    out = {"stems": stems} if stems is not None else RS.render(prm, score, P, stages={"mixBus": False})
+    M = P["mixBus"]
+    gains = dict(gains or {})
+    bus = {"stemGainsDb": gains, "eq": None, "compressor": None, "gainDb": 0.0, "ceilingDbtp": None}
+    bus_sum = sum(out["stems"][k] * 10 ** (gains.get(k, 0.0) / 20.0) for k in out["stems"])
+    ref_mid = RS.mono(ref["mix"])
+    if M["eq"]:
+        bus["eq"] = RS.measure_eq(ref_mid, RS.mono(bus_sum), RS.fx_spans(score, P), sr, P)
+    ref_lufs = loudness.integrated(ref["mix"], sr)
+    tp = loudness.true_peak_db(ref["mix"], sr, 4)
+    # 12 October 2026: the ceiling is the measured reference peak, never above the delivery limit of verify.py
+    # (mix.truePeakCeilingDbtp, -1 dBTP): the reference peaks above it, and verify gives 0 to a mix over it.
+    bus["ceilingDbtp"] = round(min(tp, M.get("ceilingMaxDbtp", -0.1)), 2)
+    G = M["compressorGrid"]
+    cands = []
+    for th in G["thresholdDbRelLufs"]:
+        for ra in G["ratio"]:
+            b = copy.deepcopy(bus)
+            b["compressor"] = {"thresholdDb": round(ref_lufs + th, 2), "ratio": ra, "attackMs": M["compressorAttackMs"], "releaseMs": M["compressorReleaseMs"]}
+            y = RS.apply_mix_bus(out["stems"], {**b, "ceilingDbtp": None}, sr, P)
+            b["gainDb"] = round(ref_lufs - loudness.integrated(y, sr), 2) if M["lufsMatch"] else 0.0
+            if not M["limiter"]:
+                b["ceilingDbtp"] = None
+            cands.append(b)
+    with ProcessPoolExecutor(max_workers=min(P["workers"], len(cands))) as ex:
+        res = list(ex.map(comp_job, [(out["stems"], b, ref_mid, sr, P) for b in cands]))
+    best_i = int(np.argmax([s for _, s in res]))
+    best = cands[best_i]
+    best["compressorGridScores"] = [{"compressor": c, "ploss": round(s, 4)} for c, s in res]
+    for _ in range(M.get("lufsPasses", 1)):  # limiter moves loudness: re-measure and correct (12 October 2026: 3 passes)
+        y = RS.apply_mix_bus(out["stems"], best, sr, P)
+        best["gainDb"] = round(best["gainDb"] + ref_lufs - loudness.integrated(y, sr), 2)
+    best["refLufs"], best["refTruePeakDbtp"] = round(ref_lufs, 2), round(tp, 2)
+    prm["mixBus"] = best
+    return prm
+
+
+# ---------------------------------------------------------------- write a version (12 October 2026)
+
+def write_version(d, prm, score, out, rows, meta, P, fits=None):
+    sr = P["sampleRate"]
+    (d / "stems").mkdir()
+    for k, x in out["stems"].items():
+        RS.write_stereo(d / "stems" / f"{k}.wav", x, sr)
+    RS.write_stereo(d / "mix.wav", out["mix"], sr)
+    prm = {**prm, "version": d.name}
+    (d / "params.json").write_text(json.dumps(prm, indent=1, ensure_ascii=False) + "\n", encoding="utf-8")
+    (d / "score.json").write_text(json.dumps(score, ensure_ascii=False) + "\n", encoding="utf-8")
+    if rows is not None:
+        (d / "scores.json").write_text(json.dumps({"date": "12 October 2026", "headline": RS.headline(rows), "detail": rows}, indent=1) + "\n", encoding="utf-8")
+    if fits is not None:
+        (d / "fits.json").write_text(json.dumps(fits, indent=1) + "\n", encoding="utf-8")
+    (d / "meta.json").write_text(json.dumps({"date": "12 October 2026", "private": True, **meta}, indent=1) + "\n", encoding="utf-8")
+
+
+def copy_stem_iter(prm, d, src_dir, P):
+    """12 October 2026 (MI-assemble): a version keeps a copy of each stem's params (assemble.CFG files) so it is
+    rebuilt from its own folder. FR : copie des parametres de chaque piste dans la version."""
+    if not prm.get("stemIter"):
+        return
+    from zrmd.audio.stems import assemble as AS
+    for stem in prm["stemIter"]:
+        src = stem_iter_dir(prm, src_dir, stem, P)
+        dst = d / ASSEMBLE["copyDir"] / stem
+        dst.mkdir(parents=True, exist_ok=True)
+        for f in AS.CFG["files"][stem]:
+            shutil.copy2(src / f, dst / f)
+
+
+def ref_analysis(P, ref):
+    p = Path(P["paths"]["cache"]) / f"music-analysis-{P['sampleRate']}.json"
+    if p.exists():
+        return json.loads(p.read_text())
+    a = RS.music_analysis({k: RS.mono(ref["stems"][k]) for k in RS.STEMS}, P["sampleRate"])
+    p.write_text(json.dumps(a))
+    return a
+
+
+def base_params(score, ref):
+    return {"format": "zrmd.resynth/1", "date": "12 October 2026", "slug": score.get("slug"),
+            "_doc": "12 October 2026: procedural controls of this render. tempo.bpm and transposeSemitones retime and transpose the score; voices.<role>.timbre are the fitted block parameters (edit freely), gainDb and mute per role; stemGainsDb and stemFx per stem (eq per section, automation on or off, stereo side/mid per band); mixBus; patternEdits (ops mute, gainDb, transpose, dropBars, addDrumSteps). Render: Scripts/ResynthMusic.py render --params <this file>.",
+            "tempo": {"bpm": score["tempo"]["bpm"], "referenceBpm": score["tempo"]["bpm"]}, "transposeSemitones": 0,
+            "lengthSamples": ref["n"], "voices": {}, "stemGainsDb": {}, "stemFx": {}, "mixBus": None, "patternEdits": []}
+
+
+def cmd_build(a, P):
+    stage = {**STAGES[a.stage]}
+    bench = Path(P["paths"]["bench"])
+    score = json.loads(Path(P["paths"]["score"]).read_text())
+    # 12 October 2026 (M3 critic): the retag stage re-measures timbres on the base version's score (gap-filled hits kept).
+    if a.base and not stage["refit"] and (not stage.get("sms") or stage.get("retag")) and (bench / a.base / "score.json").exists():
+        # 12 October 2026: a stage that keeps the timbres keeps the base version's score too (refined onsets and
+        # levels); V_023 and V_024 were built from the M1 score by mistake. FR : la partition de la version de base.
+        score = json.loads((bench / a.base / "score.json").read_text())
+    ref = RS.load_reference(P)
+    RS.install(P)
+    t0 = time.time()
+    fits = None
+    if stage["refit"]:
+        prm = base_params(score, ref)
+        prm["voices"], fits = run_fits(P, ref, score, stage, None)
+    else:
+        if not a.base:
+            raise SystemExit("--from V_NNN is required for this stage")
+        prm = json.loads((bench / a.base / "params.json").read_text())
+        prm["stemFx"], prm["mixBus"] = {}, None
+        if stage.get("retag"):
+            from zrmd.audio import retag
+            score, moved = retag.retag(score, RS.mono(ref["stems"]["drums"]).astype(np.float64), P["sampleRate"], P["retag"])
+            log(f"retag: {len(moved)} hits {P['retag']['fromClass']} -> {P['retag']['toClass']}: " + ", ".join(f"{m['t']:.2f}s {m['pitchHz']:.0f}Hz" for m in moved))
+        if stage.get("sms"):
+            log("sms analysis and calibration")
+            only = [r for r in (a.roles or "").split(",") if r] or (list(P["retag"]["smsRoles"]) if stage.get("retag") else [])
+            prm, score, fits = run_sms(prm, P, ref, score, only)
+        if stage.get("gap"):
+            from zrmd.audio import gapfill
+            score, added = gapfill.fill(score, RS.mono(ref["stems"]["drums"]).astype(np.float64), P["sampleRate"], P["gapFill"])
+            log(f"gap fill: {len(added)} drum hits added " + ", ".join(f"{h['t']:.2f}s {h['class']} ({h['how']})" for h in added))
+        if stage.get("dev"):
+            log("per-event deviation")
+            prm, score, fits = run_dev(prm, P, ref, score)
+        if stage.get("phrase"):
+            log("phrase refinement")
+            prm, fits = run_phrase(prm, P, ref, score)
+            fits = {"phrase": fits}
+    if stage.get("stemIter"):  # 12 October 2026 (MI-assemble): keep the base stem fx, take the chosen stem-iter stems
+        base_prm = json.loads((bench / a.base / "params.json").read_text())
+        prm["stemFx"] = base_prm["stemFx"]
+        picks = dict(kv.split("=", 1) for kv in (a.stems or "").split(",") if "=" in kv)
+        prm["stemIter"] = {s: {"version": v, "source": str(Path(P["paths"]["bench"]) / ASSEMBLE["stemIterDir"] / s / v)}
+                           for s, v in best_stem_versions(P, picks).items()}
+        log("stemIter: " + ", ".join(f"{s}={e['version']}" for s, e in prm["stemIter"].items()))
+    if stage["eq"] or stage["automation"] or stage["stereo"]:
+        log("measuring stem eq and stereo")
+        prm = fit_stem_fx(prm, P, ref, score, stage)
+    trims = None
+    if stage["mixBus"] and stage.get("stemIter"):
+        log("rendering the stems")
+        stems = render_full(prm, score, P, stages={"mixBus": False})["stems"]
+        # 12 October 2026: the eq refit after a trim does not always raise the critic (measure_eq matches power per
+        # section, not the critic's log error), so every candidate bus is scored with its loudness re-matched and the
+        # best one is kept (V_035 lost 0.2 point by keeping the last refit). FR : on garde le meilleur bus mesure.
+        gains, trims, best = {}, [], (-1.0, None)
+        for p in range(ASSEMBLE["eqPasses"]):
+            log(f"fitting the mix bus, pass {p + 1}")
+            prm = fit_mix_bus(prm, P, ref, score, stems, gains)
+            s0 = trim_job((stems, prm["mixBus"], RS.mono(ref["mix"]), P["sampleRate"], P))
+            gains, h, bus2 = fit_stem_trims(prm, P, ref, stems, ASSEMBLE["busGain"])
+            bus = relufs({**prm["mixBus"], "stemGainsDb": gains}, stems, ref, P)
+            s1 = trim_job((stems, bus, RS.mono(ref["mix"]), P["sampleRate"], P))
+            s2 = h[-1]["mixTfBands"]
+            log(f"pass {p + 1}: refit bus {s0:.3f}, trims with loudness re-matched {s1:.3f}, trims and bus gain {s2:.3f}")
+            trims.append({"pass": p + 1, "refitBus": round(s0, 4), "trimmedBus": round(s1, 4), "trimmedBusGain": s2, "history": h})
+            cands_ = ((s0, prm["mixBus"]), (s1, bus)) + (((s2, bus2),) if ASSEMBLE["busGain"] else ())
+            for sc, b in cands_:
+                if sc > best[0]:
+                    best = (sc, copy.deepcopy(b))
+        prm["mixBus"] = best[1]
+        log(f"kept bus: mix {best[0]:.3f}, trims {best[1].get('stemGainsDb')}")
+        fits = {"stemTrims": trims}
+    elif stage["mixBus"]:
+        log("fitting the mix bus")
+        prm = fit_mix_bus(prm, P, ref, score)
+    log("rendering from params")
+    out = render_full(prm, score, P)
+    log("scoring")
+    rows = RS.score_all(ref, out, score, P, ref_analysis(P, ref))
+    d = next_version(bench)
+    write_version(d, prm, score, out, rows, {"kind": "music-resynthesis", "stage": a.stage, "parent": a.base, "flags": stage,
+                                            "seconds": round(time.time() - t0, 1)}, P, fits)
+    copy_stem_iter(prm, d, None, P)
+    log(f"{d.name} written")
+    print(json.dumps({"version": d.name, "headline": RS.headline(rows)}, indent=1))
+
+
+def cmd_render(a, P):
+    bench = Path(P["paths"]["bench"])
+    prm = json.loads(Path(a.params).read_text())
+    src = Path(a.params).parent / "score.json"
+    score = json.loads((src if src.exists() else Path(P["paths"]["score"])).read_text())
+    RS.install(P)
+    out = render_full(prm, score, P, base_dir=Path(a.params).parent)
+    rows = None
+    if a.score:
+        ref = RS.load_reference(P)
+        rows = RS.score_all(ref, out, score, P, ref_analysis(P, ref))
+    d = next_version(bench)
+    write_version(d, prm, score, out, rows, {"kind": a.kind, "renderedFrom": str(a.params), "note": a.note}, P)
+    copy_stem_iter(prm, d, Path(a.params).parent, P)
+    log(f"{d.name} written")
+    print(json.dumps({"version": d.name, "headline": RS.headline(rows) if rows else None}, indent=1))
+
+
+def cmd_variation(a, P):
+    bench = Path(P["paths"]["bench"])
+    V = P["variation"]
+    prm = json.loads((bench / a.base / "params.json").read_text())
+    score = json.loads((bench / a.base / "score.json").read_text())
+    voice = a.voice or V["voice"]
+    # 12 October 2026: a measured (sms) voice is edited through its macros, a bank voice through its timbre.
+    key = "macros" if prm["voices"][voice].get("engine") == "sms" else "timbre"
+    timbre = json.loads(a.timbre) if a.timbre else (V["macrosSms"] if key == "macros" else V["timbre"])
+    before = copy.deepcopy(prm["voices"][voice][key])
+    applied = {k: v for k, v in timbre.items() if k in before}
+    if not applied:
+        raise SystemExit(f"none of {list(timbre)} is a {key} parameter of {voice} ({prm['voices'][voice].get('block', 'sms')}): {list(before)}")
+    prm["voices"][voice][key].update(applied)
+    prm["tempo"]["bpm"] = a.bpm or V["bpm"]
+    prm["transposeSemitones"] = a.transpose if a.transpose is not None else V["transposeSemitones"]
+    prm["mixBus"] = None if prm.get("mixBus") is None else {**prm["mixBus"], "eq": None}
+    prm["variationOf"] = a.base
+    RS.install(P)
+    out = RS.render(prm, score, P)
+    sr = P["sampleRate"]
+    an = RS.music_analysis({k: RS.mono(out["stems"][k]) for k in RS.STEMS}, sr)
+    base_an = RS.music_analysis({k: RS.mono(RS._read(bench / a.base / "stems" / f"{k}.wav", sr)) for k in RS.STEMS}, sr)
+    changes = {"tempoBpm": [score["tempo"]["bpm"], prm["tempo"]["bpm"]], "transposeSemitones": prm["transposeSemitones"],
+               "voice": voice, "timbreBefore": {k: before[k] for k in applied}, "timbreAfter": applied,
+               "measured": {"base": {"bpm": base_an["bpm"], "key": base_an["key"]["name"], "seconds": base_an["duration"]},
+                            "variation": {"bpm": an["bpm"], "key": an["key"]["name"], "seconds": an["duration"]}}}
+    d = next_version(bench)
+    write_version(d, prm, score, out, None, {"kind": "variation", "parent": a.base, "changes": changes,
+                                            "publishable": "only after rights validation by Matthieu"}, P)
+    (d / "variation.json").write_text(json.dumps(changes, indent=1) + "\n")
+    log(f"{d.name} written")
+    print(json.dumps({"version": d.name, **changes}, indent=1))
+
+
+def cmd_baseline(a, P):
+    """The M1 sine and noise render (with automation) scored by the M2 scorer: the starting point of the bench."""
+    from zrmd.audio import transcribe as T
+    ref = RS.load_reference(P)
+    score = json.loads(Path(P["paths"]["score"]).read_text())
+    sr = P["sampleRate"]
+    r = T.render_score(score, sr, T.params(), automation=True)
+    stems = {k: np.stack([np.pad(r[k], (0, max(0, ref["n"] - len(r[k]))))[: ref["n"]]] * 2, axis=1) for k in RS.STEMS}
+    out = {"stems": stems, "mix": sum(stems.values())}
+    rows = RS.score_all(ref, out, score, P, ref_analysis(P, ref))
+    p = Path(P["paths"]["bench"]) / "baselines"
+    p.mkdir(exist_ok=True)
+    (p / "m1-sine-scores.json").write_text(json.dumps({"date": "12 October 2026", "headline": RS.headline(rows), "detail": rows}, indent=1))
+    print(json.dumps(RS.headline(rows), indent=1))
+
+
+def cmd_rescore(a, P):
+    """12 October 2026: stable scores (resynth.score_stable) of existing versions, added as scores-stable.json beside
+    their scores.json (an added file, never a rewrite). FR : mesures stables des versions deja rendues."""
+    bench = Path(P["paths"]["bench"])
+    ref = RS.load_reference(P)
+    sr = P["sampleRate"]
+    out = {}
+    for v in a.versions.split(","):
+        d = bench / v
+        dst = d / "scores-stable.json"
+        if dst.exists():
+            out[v] = json.loads(dst.read_text())["stable"]
+            continue
+        st = {k: RS._read(d / "stems" / f"{k}.wav", sr) for k in RS.STEMS}
+        score = json.loads((d / "score.json").read_text())
+        res = RS.score_stable(ref, {"stems": st, "mix": RS._read(d / "mix.wav", sr)}, score, P)
+        dst.write_text(json.dumps({"date": "12 October 2026", "stable": res}, indent=1) + "\n")
+        out[v] = res
+    print(json.dumps(out, indent=1))
+
+
+def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("cmd", choices=["build", "render", "variation", "baseline", "rescore"])
+    ap.add_argument("--stage", choices=list(STAGES), default="own")
+    ap.add_argument("--from", dest="base")
+    ap.add_argument("--params")
+    ap.add_argument("--kind", default="music-resynthesis-rerender")
+    ap.add_argument("--note", default="")
+    ap.add_argument("--score", action="store_true")
+    ap.add_argument("--bpm", type=float)
+    ap.add_argument("--transpose", type=float)
+    ap.add_argument("--voice")
+    ap.add_argument("--timbre")
+    ap.add_argument("--set", action="append")
+    ap.add_argument("--versions", default="")
+    ap.add_argument("--roles", default="")
+    ap.add_argument("--stems", default="", help="12 October 2026 (assemble): stem=V_NNN pairs, best stem-iter version otherwise")
+    a = ap.parse_args()
+    over = parse_set(a.set)
+    if over:
+        # 13 October 2026: merge into the overrides already in the environment (MusicRun sets the paths of the slug there);
+        # replacing them sent a run on another video's folders and wrote a stray V_039 in onekey-pro-2.
+        def _merge(a_, b_):
+            for k_, v_ in b_.items():
+                a_[k_] = _merge(a_.get(k_, {}), v_) if isinstance(v_, dict) and isinstance(a_.get(k_), dict) else v_
+            return a_
+        os.environ[RS.OVERRIDES_ENV] = json.dumps(_merge(json.loads(os.environ.get(RS.OVERRIDES_ENV) or "{}"), over))
+    P = RS.params()
+    {"build": cmd_build, "render": cmd_render, "variation": cmd_variation, "baseline": cmd_baseline, "rescore": cmd_rescore}[a.cmd](a, P)
+
+
+if __name__ == "__main__":
+    main()

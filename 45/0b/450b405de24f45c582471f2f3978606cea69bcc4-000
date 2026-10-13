@@ -1,0 +1,34 @@
+# 12 October 2026: ui_click, a very short band-passed noise click with a sine at the band centre: interface clicks,
+# toggles, taps. Derived from the mathematics. FR : clic d'interface.
+import math
+
+import torch
+
+from zrmd.audio import sfxdsp as D
+from zrmd.audio.bank import Block, db_to_amp
+
+META = D.meta("ui", "UI click: very short band-passed noise click with a sine at the band centre.", ["ui", "click", "tap", "toggle", "transient", "short"], "filtered noise click and sine")
+
+
+class UiClick(Block):
+    ID = "ui_click"
+    # 12 October 2026 (A1): coupled parameters scanned jointly by dfit (see dfit scanPairs).
+    FIT = {"scanPairs": [["attack_s", "tone_db"], ["bw_oct", "tone_db"]]}
+    PARAMS = [
+        D.param("center_hz", "Hz", 500, 14000, 3000, "log", "band centre and sine pitch"),
+        D.param("bw_oct", "octaves", 0.3, 5.0, 1.5, "log", "band width"),
+        D.param("decay_s", "s (T60)", 0.0008, 0.04, 0.008, "log", "time to fall 60 dB"),
+        D.param("attack_s", "s", 0.0001, 0.003, 0.0003, "log", "linear attack"),
+        D.param("tone_db", "dB re noise", -40, 6, -10, "lin", "sine level"),
+        D.AMP(-14.0), D.ONSET(),
+    ]
+
+    def synth(self, v, t, sr):
+        o = v["onset_s"]
+        env = D.decay(t, o, v["decay_s"], v["attack_s"])
+        n = D.filtered(self.noise(t.shape[0], t.device), lambda fr: D.band(fr, v["center_hz"], v["bw_oct"]), sr)
+        tone = math.sqrt(2.0) * torch.sin(2.0 * math.pi * v["center_hz"] * torch.clamp(t - o, min=0.0))
+        return db_to_amp(v["amp_db"]) * env * (n + db_to_amp(v["tone_db"]) * tone)
+
+
+BLOCK = UiClick

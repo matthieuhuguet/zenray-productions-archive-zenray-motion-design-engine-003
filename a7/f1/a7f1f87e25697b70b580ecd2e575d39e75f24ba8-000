@@ -1,0 +1,54 @@
+{
+ "_note": "12 October 2026: family parameters of the parametric 3D device (templates/device3d). Instances override them per version.",
+ "frame_rule": {
+  "r_min": 60,
+  "rg": 1.35,
+  "rb": 1.6,
+  "min_px": 400,
+  "grid": [
+   32,
+   50
+  ],
+  "bezel": 0.02,
+  "text_kernel": 0.06,
+  "rz_sign": -1
+ },
+ "background": "#000000",
+ "camera": {
+  "fov": 30
+ },
+ "device": {
+  "aspect": 1.55,
+  "depth": 0.06,
+  "radius": 0.13,
+  "bezel": 0.012,
+  "frame_rgb": [
+   140,
+   59,
+   10
+  ],
+  "metalness": 1.0,
+  "roughness": 0.45,
+  "clearcoat": 0.0,
+  "exposure": 1.0,
+  "environment": 0.35,
+  "key_light": 0.5,
+  "key_dir": [
+   4,
+   0.5,
+   2
+  ],
+  "screen_px": [
+   512,
+   794
+  ],
+  "bevel": 0.006
+ },
+ "screen": {
+  "label": "",
+  "label_color": "#ffffff",
+  "label_size": 0.05,
+  "label_font": "sans-serif",
+  "label_y": 0.55
+ }
+}

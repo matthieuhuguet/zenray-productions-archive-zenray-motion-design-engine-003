@@ -1,0 +1,33 @@
+# 12 October 2026: downlifter, the mirror of riser: full level 3 ms after onset, fading as (1 - progress) ** curve,
+# while a noise band and a sine sweep geometrically down from start_hz to end_hz. Derived from the mathematics.
+# FR : descente, bruit et sinus qui tombent ensemble.
+import torch
+
+from zrmd.audio import sfxdsp as D
+from zrmd.audio.bank import Block, db_to_amp
+
+ATTACK_S = 0.003
+META = D.meta("riser", "Downlifter: noise band and sine sweeping down together while the level fades.", ["downlifter", "drop", "fall", "sweep", "transition"], "swept filtered noise and sine (sfxdsp.swept_band_tone)")
+
+
+class Downlifter(Block):
+    ID = "downlifter"
+    PARAMS = [
+        D.param("start_hz", "Hz", 500, 16000, 6000, "log", "centre at the start"),
+        D.param("end_hz", "Hz", 40, 3000, 200, "log", "centre at the end"),
+        D.param("bw_oct", "octaves", 0.3, 4.0, 1.2, "log", "noise band width"),
+        D.param("duration_s", "s", 0.15, 0.85, 0.7, "log", "length of the fall"),
+        D.param("curve", "power", 0.5, 5.0, 1.5, "log", "level fade exponent"),
+        D.param("tone_db", "dB re noise", -40, 0, -10, "lin", "sine level"),
+        D.AMP(-20.0), D.ONSET(0.12, 0.02),
+    ]
+
+    def synth(self, v, t, sr):
+        o, d = v["onset_s"], v["duration_s"]
+        x = D.progress(t, o, d)
+        env = torch.clamp((t - o) / ATTACK_S, 0.0, 1.0) * torch.pow(1.0 - x + 1e-6, v["curve"])
+        y = D.swept_band_tone(self.noise(t.shape[0], t.device), t, sr, o, d, v["start_hz"], v["end_hz"], v["bw_oct"], v["tone_db"])
+        return db_to_amp(v["amp_db"]) * env * y
+
+
+BLOCK = Downlifter

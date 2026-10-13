@@ -1,0 +1,64 @@
+# 12 October 2026 (A2): re-run the failed recover cases of a VerifySoundBank --json report (or chosen block#case
+# pairs) with dfit overrides, in parallel CPU processes, to test a fitter or FIT-hint change on the hard cases only
+# before a full verification run (a full run of 31 blocks takes about 25 minutes).
+# Usage: python -I Scripts/RefitSoundCases.py --report verify.json [--cases supersaw#1,chorus#2]
+#        [--overrides '{"scanRounds": 6}'] [--workers 16] [--json]
+# Exit 0 when every re-run case reaches bank.verify.recoverMin.
+# FR : relance seulement les cas ratés, avec des réglages d'ajustement modifiés, pour tester un correctif vite.
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import sys
+from concurrent.futures import ProcessPoolExecutor
+from pathlib import Path
+
+os.environ.setdefault("OMP_NUM_THREADS", "1")
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+from zrmd.audio import bank, config  # noqa: E402
+
+
+def run(job: dict) -> dict:
+    import torch
+    torch.set_num_threads(1)
+    from zrmd.audio import dfit
+    sr = config.get("bank.sampleRate")
+    target = bank.render_block(job["target"], job["params"], config.get("bank.verify.seconds"), sr)
+    try:
+        r = dfit.fit(target, [job["target"]], sr, device="cpu", overrides=job["overrides"])
+    except Exception as exc:  # a crash is a red case, named. FR : une erreur devient un cas rouge nommé.
+        return {**job, "score": 0.0, "exception": f"{type(exc).__name__}: {exc}"}
+    return {"target": job["target"], "case": job["case"], "score": r["score"], "b1": (r["b1"] or {}).get("score"),
+            "seconds": r["seconds"], "scan": r["scan"], "polish": r["polish"], "fitted": r["params"][0], "params": job["params"]}
+
+
+def main() -> int:
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--report", required=True)
+    ap.add_argument("--cases", default="")
+    ap.add_argument("--overrides", default="{}")
+    ap.add_argument("--workers", type=int, default=16)
+    ap.add_argument("--json", action="store_true")
+    a = ap.parse_args()
+    rep = json.loads(Path(a.report).read_text(encoding="utf-8"))
+    want = {s for s in a.cases.split(",") if s}
+    ov = json.loads(a.overrides)
+    jobs = [{"target": c["target"], "case": c["case"], "params": c["params"], "overrides": ov} for c in rep["cases"]
+            if c["expect"] == "recover" and ((f"{c['target']}#{c['case']}" in want) if want else not c["ok"])]
+    with ProcessPoolExecutor(max_workers=a.workers) as ex:
+        res = list(ex.map(run, jobs))
+    lo = config.get("bank.verify.recoverMin")
+    for r in res:
+        r["ok"] = r["score"] >= lo
+    if a.json:
+        print(json.dumps(res, indent=1))
+    else:
+        for r in res:
+            print(f"{'OK ' if r['ok'] else 'RED'} {r['target']}#{r['case']} ploss {r['score']:7.3f} b1 {r.get('b1')} {r.get('seconds')} s {r.get('exception', '')}")
+    return 0 if all(r["ok"] for r in res) else 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())

@@ -1,0 +1,33 @@
+# 12 October 2026: tremolo, amplitude modulation by 1 - depth (1 + sin(2 pi rate t + phase)) / 2.
+# FR : modulation d'amplitude sinusoïdale.
+import math
+
+import torch
+
+from zrmd.audio.bank import db_to_amp, stft_filter
+from zrmd.audio import fxdsp as F
+from zrmd.audio.fxdsp import EffectBlock
+from zrmd.audio.fxdsp import param as P
+
+META = {"family": "modulation", "kind": "effect",
+        "description": "Sine amplitude modulation (rate, depth, phase). Tremolo, pulsing pads, helicopter and alarm flutters. (12 October 2026)",
+        "tags": ["effect", "modulation", "tremolo", "amplitude", "pulse"],
+        "sources": [{"what": "amplitude modulation", "url": None, "licence": F.SOURCE}],
+        "licence": "original"}
+
+
+class Tremolo(EffectBlock):
+    ID = "tremolo"
+    PARAMS = [
+        P("rate_hz", "Hz", 1.0, 20.0, 7.0, "log", "modulation rate"),
+        P("depth", "0..1", 0.0, 1.0, 0.6, "lin", "modulation depth"),
+        P("phase", "cycles", 0.0, 1.0, 0.0, "lin", "LFO phase at t = 0"),
+        P("out_db", "dB", -24, 12, 0, "lin", "output gain"),
+    ]
+
+    def fx(self, v, x, t, sr):
+        lfo = 0.5 * (1.0 + torch.sin(F.TWO_PI * (v["rate_hz"] * t + v["phase"])))
+        return db_to_amp(v["out_db"]) * x * (1.0 - v["depth"] * lfo)
+
+
+BLOCK = Tremolo

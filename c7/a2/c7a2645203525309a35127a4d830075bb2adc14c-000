@@ -1,0 +1,42 @@
+# 12 October 2026: modal_ding, six decaying sine modes with stretched ratios k**stretch (1 harmonic, 2 bar-like),
+# gains k**-tilt and decays decay_s / k**damp. Modal synthesis (Adrien 1991), derived from the mathematics.
+# FR : six modes amortis à rapports étirés ; dings, verres, petites cloches.
+import math
+
+import torch
+
+from zrmd.audio.bank import Block, db_to_amp, envelope, stft_filter
+from zrmd.audio import fxdsp as F
+from zrmd.audio.fxdsp import param as P
+
+META = {"family": "modal", "kind": "source",
+        "description": "Six decaying modes with stretched ratios k^stretch, spectral tilt and frequency dependent damping. Dings, glass pings, small bells. (12 October 2026)",
+        "tags": ["tonal", "modal", "ding", "inharmonic", "glass", "ui"],
+        "sources": [{"what": "modal synthesis", "url": None, "reference": "J.-M. Adrien, The missing link: modal synthesis, 1991", "licence": F.SOURCE}],
+        "licence": "original"}
+N_MODES = 6
+
+
+class ModalDing(Block):
+    ID = "modal_ding"
+    PARAMS = [
+        P("f0_hz", "Hz", 100, 8000, 880, "log", "lowest mode"),
+        P("stretch", "exponent", 0.8, 2.2, 1.35, "lin", "mode k sits at f0 * k**stretch"),
+        P("tilt", "exponent", 0.0, 3.0, 1.2, "lin", "mode gain k**-tilt"),
+        P("decay_s", "s (T60)", 0.05, 6.0, 1.2, "log", "decay of the lowest mode"),
+        P("damp", "exponent", 0.0, 2.0, 0.7, "lin", "mode decay decay_s / k**damp"),
+        P("amp_db", "dBFS", -60, 0, -12, "lin", "peak level"),
+        P("onset_s", "s", 0.0, 0.25, 0.02, "lin", "start time in the window"),
+        P("attack_s", "s", 0.0005, 0.05, 0.001, "log", "linear attack"),
+    ]
+
+    def synth(self, v, t, sr):
+        ks = [float(k) for k in range(1, N_MODES + 1)]
+        freqs = [v["f0_hz"] * k ** v["stretch"] for k in ks]
+        gains = [k ** (-v["tilt"]) for k in ks]
+        decays = [v["decay_s"] / k ** v["damp"] for k in ks]
+        y = F.partials(t, sr, freqs, gains, decays, v["onset_s"], v["attack_s"]) / sum(gains)
+        return F.amp(v) * y
+
+
+BLOCK = ModalDing

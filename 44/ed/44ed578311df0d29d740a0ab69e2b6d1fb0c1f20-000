@@ -1,0 +1,42 @@
+# 12 October 2026: reverse_swell, a reversed tail: level grows as exp((t - end) / tau_s) up to a hard cut at the end,
+# while a low-pass opens by open_oct octaves up to cut_hz, with a sine at tone_hz under the same swell.
+# Derived from the mathematics. FR : swell inversé, queue de réverbération à l'envers coupée net.
+import math
+
+import torch
+
+from zrmd.audio import sfxdsp as D
+from zrmd.audio.bank import Block, db_to_amp
+
+CUT_S = 0.002
+META = D.meta("riser", "Reverse swell: exponential crescendo of low-passed noise and a sine, filter opening, hard cut at the end.", ["reverse", "swell", "reverse cymbal", "suck", "transition"], "exponential swell and moving low-pass")
+
+
+class ReverseSwell(Block):
+    ID = "reverse_swell"
+    PARAMS = [
+        D.param("duration_s", "s", 0.15, 0.85, 0.6, "log", "length of the swell"),
+        D.param("tau_s", "s", 0.02, 0.6, 0.15, "log", "time constant of the crescendo"),
+        D.param("cut_hz", "Hz", 300, 16000, 6000, "log", "low-pass cutoff at the end"),
+        D.param("open_oct", "octaves", 0.0, 5.0, 2.0, "lin", "how far the low-pass opens"),
+        D.param("tone_hz", "Hz", 80, 2000, 300, "log", "sine pitch"),
+        D.param("tone_db", "dB re noise", -40, 0, -12, "lin", "sine level"),
+        D.AMP(-14.0), D.ONSET(0.12, 0.02),
+    ]
+
+    def synth(self, v, t, sr):
+        o, d = v["onset_s"], v["duration_s"]
+        end = o + d
+        env = torch.exp(torch.clamp(t - end, max=0.0) / v["tau_s"]) * torch.sigmoid((end - t) / CUT_S) * D.gate(t, o)
+
+        def mask(freqs, times):
+            c = torch.log2(v["cut_hz"]) + v["open_oct"] * (D.progress(times, o, d) - 1.0)
+            over = torch.nn.functional.softplus(4.0 * (D.log2f(freqs) - c)) / 4.0
+            return torch.pow(10.0, -24.0 * over / 20.0)
+
+        n = D.moving(self.noise(t.shape[0], t.device), mask, sr)
+        tone = math.sqrt(2.0) * torch.sin(2.0 * math.pi * v["tone_hz"] * t)
+        return db_to_amp(v["amp_db"]) * env * (n + db_to_amp(v["tone_db"]) * tone)
+
+
+BLOCK = ReverseSwell

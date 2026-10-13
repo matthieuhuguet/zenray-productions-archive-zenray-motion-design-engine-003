@@ -1,0 +1,52 @@
+# 12 October 2026: reverb_noise_tail, a statistical reverb: the impulse response is a fixed-seed white noise whose
+# STFT magnitude decays as 10 ** (-3 t / T60(f)), with T60(f) = t60_s * (hf + (1 - hf) / (1 + (f / 2000) ** 2)),
+# normalised to unit energy, delayed by predelay_s (fractional, by phase), convolved by FFT and mixed equal power.
+# Moorer (CMJ 3(2), 1979) for the decaying noise model. FR : réverbération par bruit à décroissance exponentielle.
+import math
+
+import torch
+
+from zrmd.audio.bank import db_to_amp, stft_filter
+from zrmd.audio import fxdsp as F
+from zrmd.audio.fxdsp import EffectBlock
+from zrmd.audio.fxdsp import param as P
+
+META = {"family": "reverb", "kind": "effect",
+        "description": "Decaying filtered noise impulse response (T60, high frequency damping ratio, predelay), FFT convolution, equal power mix. Rooms, halls, tails. (12 October 2026)",
+        "tags": ["effect", "reverb", "tail", "room", "hall", "space"],
+        "sources": [{"what": "exponentially decaying noise reverb model", "url": None, "reference": "J. A. Moorer, About this reverberation business, CMJ 3(2), 1979", "licence": F.SOURCE}],
+        "licence": "original"}
+IR_SEED_OFFSET = 1009
+
+
+class ReverbNoiseTail(EffectBlock):
+    ID = "reverb_noise_tail"
+    # 12 October 2026 (A2): fit hints measured on the failed cases of the first A2 verification (docs/build/
+    # A2-tonal-effects.md): a larger search budget, and coupled groups for the evolution strategy. FR : indications.
+    FIT = {"scanRounds": 6, "polishRounds": 12, "starts": 12, "screenSamples": 1024}
+    PARAMS = [
+        P("t60_s", "s", 0.1, 4.0, 1.2, "log", "decay time at low frequencies"),
+        P("hf_ratio", "x", 0.1, 1.0, 0.4, "log", "T60 at high frequencies relative"),
+        P("predelay_s", "s", 0.0, 0.1, 0.015, "lin", "delay before the tail"),
+        P("mix", "0..1", 0.0, 1.0, 0.35, "lin", "wet share, equal power"),
+        P("out_db", "dB", -24, 12, 0, "lin", "output gain"),
+    ]
+
+    def fx(self, v, x, t, sr):
+        n = x.shape[0]
+        noise = F.seeded_noise(n, self.seed + IR_SEED_OFFSET, x.device)
+
+        def mask(fr, tm):
+            t60 = v["t60_s"] * (v["hf_ratio"] + (1.0 - v["hf_ratio"]) / (1.0 + (fr / 2000.0) ** 2))
+            return torch.pow(10.0, -3.0 * tm / t60)
+
+        ir = stft_filter(noise, mask, 1024, 256, sr)
+        ir = ir / torch.sqrt(torch.sum(ir * ir) + 1e-12)
+        N = F.next_pow2(2 * n)
+        H = torch.fft.rfft(ir, N) * F.delay_phase(torch.linspace(0.0, math.pi, N // 2 + 1, device=x.device), v["predelay_s"] * sr)
+        wet = torch.fft.irfft(torch.fft.rfft(x, N) * H, N)[:n]
+        a = v["mix"] * math.pi / 2
+        return db_to_amp(v["out_db"]) * (torch.cos(a) * x + torch.sin(a) * wet)
+
+
+BLOCK = ReverbNoiseTail

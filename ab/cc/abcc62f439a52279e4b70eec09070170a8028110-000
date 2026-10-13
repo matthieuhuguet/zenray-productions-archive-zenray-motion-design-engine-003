@@ -1,0 +1,29 @@
+# 12 October 2026: regenerates every datasets/sound-bank/<id>/block.json and demo.wav from its block.py, then
+# index.json. Usage: python -I Scripts/BuildSoundBank.py [--blocks a,b]
+# FR : régénère block.json, demo.wav et index.json depuis les block.py.
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import sys
+from pathlib import Path
+
+# 12 October 2026 (A2): render the demos with ONE thread, like VerifySoundBank: an FFT convolution summed over several
+# threads differs by up to 5e-5 after the gain of transient_shaper (measured), above bank.verify.demoTolerance.
+# FR : un seul fil, comme le vérificateur, sinon la démo diffère au-delà de la tolérance.
+os.environ.setdefault("OMP_NUM_THREADS", "1")
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from zrmd.audio import bank  # noqa: E402
+import torch  # noqa: E402
+
+torch.set_num_threads(1)
+
+ap = argparse.ArgumentParser()
+ap.add_argument("--blocks", default="")
+a = ap.parse_args()
+for bid in [s for s in a.blocks.split(",") if s] or bank.list_blocks():
+    bank.write_block_files(bid)
+    print("built", bid)
+print(json.dumps(bank.build_index(), indent=1)[:400])

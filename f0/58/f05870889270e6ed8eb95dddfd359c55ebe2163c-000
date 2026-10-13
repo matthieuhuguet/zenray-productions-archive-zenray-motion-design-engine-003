@@ -1,0 +1,81 @@
+#!/usr/bin/env python3
+# 12 October 2026 (A3): two-direction check of the seed-invariant loss variant (ploss.stochastic).
+# Green: the same stochastic bank block rendered with two noise seeds must score >= ploss.stochastic check greenMin
+# (a perfect model of a noisy sound must be able to reach 99 against another realisation of itself).
+# Red: audible perturbations (decay x1.3, +3 dB, a 15 ms onset shift, a +50 cent sine, a wrong block) must stay
+# under the pass score. Also proves that the official loss is untouched (stochastic off reproduces A0 numbers) and
+# that the official loss itself fails the green cases (the reason the variant exists).
+# --sabotage turns the variant off in the green test, so the check must exit 1.
+# Usage: python -I Scripts/CheckStochasticLoss.py [--json] [--sabotage]
+# FR : test dans les deux sens de la variante de perte invariante a la graine du bruit.
+from __future__ import annotations
+
+import argparse
+import copy
+import json
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+import numpy as np  # noqa: E402
+import torch  # noqa: E402
+
+from zrmd.audio import bank, config, ploss  # noqa: E402
+
+GREEN_BLOCKS = ["filtered_noise_burst", "whoosh", "snare", "hihat_closed", "wind", "room_tone", "crash_cymbal"]
+
+
+def render(block: str, seed: int = 0, **params) -> np.ndarray:
+    sr = config.get("bank.sampleRate")
+    return bank.render_chain({"sr": sr, "seconds": 1.0, "blocks": [{"block": block, "params": params, "gainDb": 0.0, "offsetS": 0.0, "seed": seed}]})
+
+
+def main() -> int:
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--json", action="store_true")
+    ap.add_argument("--sabotage", action="store_true")
+    a = ap.parse_args()
+    torch.set_num_threads(4)
+    sr = config.get("bank.sampleRate")
+    pass_score = config.get("calibrate.passScore")
+    on = copy.deepcopy(config.cfg())
+    on["ploss"]["stochastic"]["enabled"] = not a.sabotage
+    off = config.cfg()
+    rows, ok = [], True
+    for b in GREEN_BLOCKS:
+        x0, x1 = render(b, 0), render(b, 1)
+        s_on = ploss.score(x1, x0, sr, on)["score"]
+        s_off = ploss.score(x1, x0, sr, off)["score"]
+        good = s_on >= pass_score
+        ok &= good
+        rows.append({"case": f"seed 0 vs 1, {b}", "expect": "green", "stochastic": round(s_on, 2), "official": round(s_off, 2), "ok": good})
+    sine = render("sine_env")
+    snare = render("snare", 1)
+    reds = [("sine_env decay x1.3", sine, render("sine_env", decay_s=0.65)),
+            ("sine_env +50 cents", sine, render("sine_env", freq_hz=440.0 * 2 ** (50 / 1200))),
+            ("filtered_noise_burst other seed +3 dB", render("filtered_noise_burst"), render("filtered_noise_burst", 1) * 10 ** (3 / 20)),
+            ("snare other seed 15 ms late", render("snare"), np.roll(snare, int(0.015 * sr))),
+            ("filtered_noise_burst fitted by a sine", render("filtered_noise_burst"), sine)]
+    cfg_red = copy.deepcopy(config.cfg())
+    cfg_red["ploss"]["stochastic"]["enabled"] = True
+    for name, ref, ours in reds:
+        s = ploss.score(ours, ref, sr, cfg_red)["score"]
+        good = s < pass_score
+        ok &= good
+        rows.append({"case": name, "expect": "red", "stochastic": round(s, 2), "ok": good})
+    # Official loss unchanged: the A0 value of filtered_noise_burst seeds (87.64) and identity 100. FR : perte officielle intacte.
+    ident = ploss.score(sine, sine, sr, off)["score"]
+    ok &= ident == 100.0 and not config.get("ploss.stochastic.enabled")
+    rows.append({"case": "official loss off by default, identity", "expect": "100", "official": ident, "ok": ident == 100.0})
+    out = {"date": "12 October 2026", "passScore": pass_score, "sabotage": a.sabotage, "ok": bool(ok), "rows": rows}
+    if a.json:
+        print(json.dumps(out, indent=1))
+    else:
+        for r in rows:
+            print(f"{'OK ' if r['ok'] else 'BAD'} {r['expect']:5} {r['case']:42} stochastic {r.get('stochastic', '')} official {r.get('official', '')}")
+        print("verdict", "green" if ok else "red")
+    return 0 if ok else 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())

@@ -1,0 +1,39 @@
+# 12 October 2026: smoke test of sound bank blocks (task A1): render at defaults, finite, peak, RMS, render time, and
+# a backward pass that must give a finite non-zero gradient to every parameter. Exit 1 on any failure.
+# Usage: python -I Scripts/SmokeSoundBlocks.py --blocks a,b   FR : test rapide des blocs, rendu et gradient.
+from __future__ import annotations
+
+import argparse
+import sys
+import time
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+import torch  # noqa: E402
+
+from zrmd.audio import bank, config  # noqa: E402
+
+ap = argparse.ArgumentParser()
+ap.add_argument("--blocks", default="")
+a = ap.parse_args()
+torch.set_num_threads(1)
+sr = config.get("bank.sampleRate")
+bad = 0
+for bid in [s for s in a.blocks.split(",") if s] or bank.list_blocks():
+    try:
+        m = bank.make(bid)
+        t0 = time.time()
+        y = m(sr, sr)
+        dt = time.time() - t0
+        (y * y).mean().backward()
+        grads = {k: float(p.grad.abs()) if p.grad is not None else 0.0 for k, p in m.raw.items()}
+        dead = [k for k, g in grads.items() if not (g > 0 and g == g and g < float("inf"))]
+        y = y.detach()
+        peak, rms = float(y.abs().max()), float(y.pow(2).mean().sqrt())
+        ok = bool(torch.isfinite(y).all()) and 0.01 < peak < 1.0 and not dead
+        bad += not ok
+        print(f"{'OK ' if ok else 'RED'} {bid:<18} peak {peak:.3f} rms {rms:.4f} {dt*1000:6.1f} ms dead={dead}")
+    except Exception as exc:
+        bad += 1
+        print(f"RED {bid:<18} {type(exc).__name__}: {exc}")
+sys.exit(1 if bad else 0)

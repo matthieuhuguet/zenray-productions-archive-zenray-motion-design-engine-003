@@ -1,0 +1,42 @@
+# 12 October 2026: fm_epiano, the classic two-operator electric piano: a ratio 1:1 FM tone whose index decays, plus a
+# short tine partial at 14 times the fundamental. Derived from Chowning 1973 FM equations. FR : piano électrique FM.
+import math
+
+import torch
+
+from zrmd.audio.bank import Block, db_to_amp, envelope, stft_filter
+from zrmd.audio import fxdsp as F
+from zrmd.audio.fxdsp import param as P
+
+META = {"family": "fm", "kind": "source",
+        "description": "Ratio 1:1 FM tone with a decaying index plus a short 14x tine partial. Electric piano, soft keys, warm notification notes. (12 October 2026)",
+        "tags": ["tonal", "fm", "epiano", "keys", "tine"],
+        "sources": [{"what": "FM synthesis equations", "url": None, "reference": "J. Chowning, JAES 21(7), 1973", "licence": F.SOURCE}],
+        "licence": "original"}
+
+
+class FmEpiano(Block):
+    ID = "fm_epiano"
+    PARAMS = [
+        P("f0_hz", "Hz", 50, 2000, 330, "log", "fundamental"),
+        P("index", "rad", 0.0, 6.0, 1.8, "lin", "peak modulation index"),
+        P("index_decay_s", "s (T60)", 0.02, 3.0, 0.6, "log", "decay of the index"),
+        P("tine_db", "dB", -40, 0, -14, "lin", "level of the 14x tine partial"),
+        P("tine_decay_s", "s (T60)", 0.01, 1.0, 0.12, "log", "decay of the tine"),
+        P("decay_s", "s (T60)", 0.1, 6.0, 1.8, "log", "decay of the tone"),
+        P("amp_db", "dBFS", -60, 0, -12, "lin", "peak level"),
+        P("onset_s", "s", 0.0, 0.25, 0.02, "lin", "start time in the window"),
+    ]
+
+    def synth(self, v, t, sr):
+        u = torch.clamp(t - v["onset_s"], min=0.0)
+        ph = F.TWO_PI * v["f0_hz"] * t
+        idx = v["index"] * torch.pow(10.0, -3.0 * u / v["index_decay_s"])
+        a = torch.tensor(0.001)
+        tone = envelope(t, v["onset_s"], a, v["decay_s"]) * torch.sin(ph + idx * torch.sin(ph))
+        tf = 14.0 * v["f0_hz"]
+        tine = db_to_amp(v["tine_db"]) * F.nyquist_mask(tf, sr) * envelope(t, v["onset_s"], a, v["tine_decay_s"]) * torch.sin(14.0 * ph)
+        return F.amp(v) * (tone + tine) / (1.0 + db_to_amp(v["tine_db"]))
+
+
+BLOCK = FmEpiano

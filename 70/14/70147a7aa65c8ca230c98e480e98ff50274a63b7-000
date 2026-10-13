@@ -1,0 +1,160 @@
+#!/usr/bin/env python3
+# 12 October 2026: writes datasets/sfx-params.json, the single parameter interface (HDA) of the audio engine.
+# The JSON is the source of truth once written; this script only documents how it was first laid out.
+# Run once: re-running overwrites the file, so it refuses unless --force is given.
+# FR : genere le fichier de parametres du moteur son ; le JSON fait foi ensuite.
+import json
+import sys
+from pathlib import Path
+
+OUT = Path(__file__).resolve().parent.parent / "datasets" / "sfx-params.json"
+
+
+def r(lo, hi, scale, default, fit=True, integer=False):
+    d = {"min": lo, "max": hi, "scale": scale, "default": default}
+    if not fit:
+        d["fit"] = False
+    if integer:
+        d["integer"] = True
+    return d
+
+
+G = r(-40.0, 0.0, "lin", -12.0)
+RECIPES = {
+    "whoosh": {"duration": r(0.25, 1.2, "log", 0.6), "peakPos": r(0.25, 0.75, "lin", 0.5), "fStart": r(200.0, 4000.0, "log", 900.0),
+               "fEnd": r(200.0, 8000.0, "log", 2500.0), "bandwidthOct": r(0.5, 3.0, "log", 1.5), "envCurve": r(0.6, 3.0, "log", 1.5),
+               "sweepCurve": r(0.4, 2.5, "log", 1.0), "gainDb": G},
+    "swoosh": {"duration": r(0.12, 0.4, "log", 0.25), "peakPos": r(0.25, 0.75, "lin", 0.45), "fStart": r(400.0, 6000.0, "log", 1500.0),
+               "fEnd": r(400.0, 10000.0, "log", 4000.0), "bandwidthOct": r(0.5, 3.0, "log", 1.2), "q": r(4.0, 12.0, "log", 7.0),
+               "resMix": r(0.0, 0.6, "lin", 0.3), "gainDb": G},
+    "swipe": {"duration": r(0.06, 0.25, "log", 0.12), "fStart": r(1500.0, 10000.0, "log", 3000.0), "fEnd": r(1500.0, 12000.0, "log", 7000.0),
+              "bandwidthOct": r(0.5, 3.0, "log", 1.5), "envCurve": r(0.6, 3.0, "log", 1.2), "gainDb": G,
+              "pan0": r(-1.0, 1.0, "lin", -0.5, fit=False), "pan1": r(-1.0, 1.0, "lin", 0.5, fit=False)},
+    "click": {"fMode": r(1000.0, 8000.0, "log", 3000.0), "decayModeMs": r(1.0, 30.0, "log", 6.0), "noiseMix": r(0.0, 1.0, "lin", 0.4),
+              "decayNoiseMs": r(0.3, 5.0, "log", 1.2), "noiseHp": r(500.0, 8000.0, "log", 2000.0), "gainDb": G},
+    "tick": {"fMode": r(3000.0, 10000.0, "log", 5000.0), "decayModeMs": r(0.5, 5.0, "log", 1.5), "noiseMix": r(0.0, 0.2, "lin", 0.05),
+             "gainDb": G, "count": r(1, 16, "lin", 1, fit=False, integer=True), "periodMs": r(30.0, 500.0, "log", 120.0, fit=False)},
+    "pop": {"fStart": r(200.0, 800.0, "log", 400.0), "fEnd": r(600.0, 2500.0, "log", 1200.0), "duration": r(0.03, 0.12, "log", 0.06),
+            "attackMs": r(0.3, 3.0, "log", 1.0), "gainDb": G},
+    "blip": {"freq": r(400.0, 3000.0, "log", 1000.0), "shape": r(0.0, 1.0, "lin", 0.0), "intervalSemis": r(0.0, 12.0, "lin", 7.0),
+             "secondLevel": r(0.0, 1.0, "lin", 0.0), "duration": r(0.04, 0.2, "log", 0.09), "attackMs": r(0.5, 5.0, "log", 1.5), "gainDb": G},
+    "impact": {"fStart": r(80.0, 200.0, "log", 130.0), "fEnd": r(30.0, 60.0, "log", 42.0), "tail": r(0.2, 1.5, "log", 0.6),
+               "reverbMix": r(0.0, 0.5, "lin", 0.15), "clickLevel": r(0.0, 1.0, "lin", 0.4), "noiseLevel": r(0.0, 1.0, "lin", 0.3),
+               "noiseLp": r(300.0, 6000.0, "log", 1500.0), "gainDb": G},
+    "boom": {"duration": r(0.8, 3.0, "log", 1.5), "fStart": r(35.0, 80.0, "log", 55.0), "dropRatio": r(0.4, 1.0, "lin", 0.7),
+             "subLevel": r(0.0, 1.0, "lin", 0.4), "noiseLevel": r(0.0, 0.6, "lin", 0.15), "driveDb": r(0.0, 6.0, "lin", 2.0), "gainDb": G},
+    "subdrop": {"fStart": r(60.0, 150.0, "log", 90.0), "fEnd": r(25.0, 50.0, "log", 35.0), "duration": r(0.5, 2.0, "log", 1.0),
+                "sweepCurve": r(0.5, 2.0, "log", 1.0), "gainDb": G},
+    "riser": {"duration": r(1.0, 8.0, "log", 2.5), "cutoffStart": r(200.0, 2000.0, "log", 500.0), "cutoffEnd": r(4000.0, 16000.0, "log", 10000.0),
+              "pitchStart": r(100.0, 800.0, "log", 220.0), "pitchRiseSemis": r(0.0, 24.0, "lin", 12.0), "sawMix": r(0.0, 1.0, "lin", 0.3),
+              "envCurve": r(0.5, 4.0, "log", 2.0), "gainDb": G},
+    "downlifter": {"duration": r(1.0, 8.0, "log", 2.0), "cutoffStart": r(4000.0, 16000.0, "log", 10000.0), "cutoffEnd": r(200.0, 2000.0, "log", 500.0),
+                   "pitchStart": r(100.0, 800.0, "log", 440.0), "pitchDropSemis": r(0.0, 24.0, "lin", 12.0), "sawMix": r(0.0, 1.0, "lin", 0.3),
+                   "envCurve": r(0.5, 4.0, "log", 2.0), "gainDb": G},
+    "glitch": {"duration": r(0.1, 1.0, "log", 0.35), "grains": r(4, 40, "lin", 12, integer=True), "grainMs": r(5.0, 40.0, "log", 15.0),
+               "bits": r(3.0, 10.0, "lin", 5.0), "hold": r(1.0, 16.0, "log", 4.0), "toneHz": r(200.0, 4000.0, "log", 900.0), "gainDb": G},
+    "keyboard": {"duration": r(0.3, 3.0, "log", 1.0), "rate": r(6.0, 14.0, "lin", 9.0), "jitterMs": r(10.0, 40.0, "lin", 20.0),
+                 "levelVarDb": r(0.0, 4.0, "lin", 2.0), "fMode": r(1000.0, 3000.0, "log", 1800.0), "noiseBand": r(1000.0, 6000.0, "log", 2500.0),
+                 "gainDb": G},
+    "trigger": {"riserDuration": r(0.2, 1.0, "log", 0.5), "cutoffEnd": r(3000.0, 14000.0, "log", 8000.0), "fStart": r(80.0, 200.0, "log", 120.0),
+                "fEnd": r(30.0, 60.0, "log", 40.0), "tail": r(0.2, 1.2, "log", 0.5), "balance": r(0.1, 0.9, "lin", 0.5), "gainDb": G},
+    "ding": {"f0": r(500.0, 3000.0, "log", 1200.0), "decay": r(0.2, 2.0, "log", 0.8), "modes": r(3, 8, "lin", 5, integer=True),
+             "highDamp": r(0.5, 4.0, "log", 1.5), "strikeMs": r(0.5, 5.0, "log", 1.0), "gainDb": G},
+    "shimmer": {"duration": r(0.5, 4.0, "log", 1.5), "fCenter": r(2000.0, 10000.0, "log", 5000.0), "rateHz": r(2.0, 12.0, "log", 6.0),
+                "spreadOct": r(0.2, 1.5, "log", 0.6), "noiseMix": r(0.0, 0.6, "lin", 0.2), "envCurve": r(0.5, 3.0, "log", 1.0), "gainDb": G,
+                "partials": r(4, 12, "lin", 8, fit=False, integer=True)},
+    "reverse": {"duration": r(0.3, 3.0, "log", 1.0), "tau": r(0.1, 1.5, "log", 0.4), "lowpass": r(1000.0, 16000.0, "log", 6000.0),
+                "highpass": r(40.0, 1000.0, "log", 150.0), "gainDb": G},
+}
+
+PERTURB = {
+    "whoosh": [{"name": "fStart x1.26", "param": "fStart", "mul": 1.26}, {"name": "duration x1.3", "param": "duration", "mul": 1.3}],
+    "swoosh": [{"name": "fEnd x1.26", "param": "fEnd", "mul": 1.26}, {"name": "duration x1.3", "param": "duration", "mul": 1.3}],
+    "swipe": [{"name": "fEnd x1.26", "param": "fEnd", "mul": 1.26}, {"name": "duration x1.3", "param": "duration", "mul": 1.3}],
+    "click": [{"name": "fMode x1.06", "param": "fMode", "mul": 1.06}, {"name": "noiseMix +0.3", "param": "noiseMix", "add": 0.3}],
+    "tick": [{"name": "fMode x1.06", "param": "fMode", "mul": 1.06}, {"name": "decayMode x2", "param": "decayModeMs", "mul": 2.0}],
+    "pop": [{"name": "fEnd x1.26", "param": "fEnd", "mul": 1.26}, {"name": "duration x1.4", "param": "duration", "mul": 1.4}],
+    "blip": [{"name": "freq x1.06", "param": "freq", "mul": 1.06}, {"name": "duration x1.3", "param": "duration", "mul": 1.3}],
+    "impact": [{"name": "tail x1.5", "param": "tail", "mul": 1.5}, {"name": "fStart x1.26", "param": "fStart", "mul": 1.26}],
+    "boom": [{"name": "duration x1.4", "param": "duration", "mul": 1.4}, {"name": "fStart x1.26", "param": "fStart", "mul": 1.26}],
+    "subdrop": [{"name": "fStart x1.26", "param": "fStart", "mul": 1.26}, {"name": "duration x1.3", "param": "duration", "mul": 1.3}],
+    "riser": [{"name": "duration x1.3", "param": "duration", "mul": 1.3}, {"name": "cutoffEnd /1.6", "param": "cutoffEnd", "mul": 0.625}],
+    "downlifter": [{"name": "duration x1.3", "param": "duration", "mul": 1.3}, {"name": "cutoffStart /1.6", "param": "cutoffStart", "mul": 0.625}],
+    "glitch": [{"name": "duration x1.4", "param": "duration", "mul": 1.4}, {"name": "toneHz x1.5", "param": "toneHz", "mul": 1.5}],
+    "keyboard": [{"name": "duration x1.4", "param": "duration", "mul": 1.4}, {"name": "fMode x1.4", "param": "fMode", "mul": 1.4}],
+    "trigger": [{"name": "riserDuration x1.4", "param": "riserDuration", "mul": 1.4}, {"name": "tail x1.5", "param": "tail", "mul": 1.5}],
+    "ding": [{"name": "f0 x1.06", "param": "f0", "mul": 1.06}, {"name": "decay x1.5", "param": "decay", "mul": 1.5}],
+    "shimmer": [{"name": "fCenter x1.26", "param": "fCenter", "mul": 1.26}, {"name": "duration x1.3", "param": "duration", "mul": 1.3}],
+    "reverse": [{"name": "duration x1.3", "param": "duration", "mul": 1.3}, {"name": "lowpass /1.6", "param": "lowpass", "mul": 0.625}],
+}
+
+DATA = {
+    "meta": {"date": "12 October 2026", "purpose": "ZenRay Motion Design audio engine: recipes, descriptors, segmentation, classification, fit, music, mix, verification",
+             "note": "Single parameter interface (HDA). Taken from the R03 lab LabParams.json, extended to 18 recipes and the full pipeline. No value is written twice."},
+    "audio": {"sampleRate": 48000, "preRollSeconds": 0.04, "tailSeconds": 0.06, "floorAmplitude": 1e-07},
+    "synthesis": {"stftFft": 1024, "stftHop": 256, "clickSeconds": 0.09, "tickSeconds": 0.03, "levelWindowMs": 5.0, "longLevelSmoothMs": 30.0,
+                  "fadeMs": 2.0, "reverbSeed": 9001, "subHarmonicRatio": 0.5, "clickBurstMs": 3.0,
+                  "bellRatios": [1.0, 2.0, 2.4, 3.0, 4.2, 5.4, 6.8, 8.1], "glitchSources": ["click", "blip", "noise"],
+                  "keyboardClickSeconds": 0.04, "keyboardNoiseQ": 1.5, "shimmerDelaysMs": [37.0, 61.0, 89.0], "shimmerDelayGain": 0.45,
+                  "sawHarmonicsMax": 60, "riserLpOrderSoftness": 0.35},
+    "analysis": {
+        "fMax": 16000.0,
+        "long": {"nFft": 1024, "hop": 240, "envWindowMs": 5.0, "envHopMs": 1.0, "timeBins": 8, "smoothMs": 30.0, "smoothSpanFraction": 0.15,
+                 "melBands": 40, "fMin": 40.0},
+        "short": {"nFft": 256, "hop": 48, "envWindowMs": 1.0, "envHopMs": 0.25, "timeBins": 4, "melBands": 16, "fMin": 100.0},
+        "shortEventSeconds": 0.12, "onsetFraction": 0.15, "spanDb": 20.0, "melFloorDb": 50.0, "swellAttackMs": 30.0,
+        "mrstftSizes": [256, 1024, 4096], "mrstftEps": 1e-07, "tonalFft": 16384, "tonalNeighbourOct": 0.3333, "tonalNeighbourMinBins": 6,
+        "tonalRampDb": 3.0, "tonalThresholdDb": 15.0, "levelWindowMs": 5.0, "tonalFMin": 40.0, "tonalSegment": 4096, "swellCenterDb": 6.0,
+        "minBinMs": 10.0, "lowBandHz": 120.0, "subAttackDb": 6.0, "subAttackMinGapMs": 25.0, "mfccCount": 13},
+    "jnd": {"levelDb": 1.0, "anchorMs": 10.0, "attackRatio": 0.25, "durationRatio": 0.1, "centroidRatio": 0.05, "melShapeDb": 2.0,
+            "pitchCents": 10.0, "kindMismatchE": 3.0, "attackMinMs": 5.0, "durationMinMs": 3.0, "anchorAttackFraction": 0.1},
+    "score": {"base": 0.99, "passThreshold": 99.0},
+    "recipes": RECIPES,
+    "perturbations": PERTURB,
+    "ceiling": {"truths": 3, "truthSeed": 20261012, "truthUnitMargin": 0.15, "targetSeed": 101, "evalSeeds": [303, 304, 305, 306], "workers": 16},
+    "segment": {
+        "hopMs": 5.0, "nFft": 2048,
+        "transientStems": ["drums", "other"], "swellStems": ["other"],
+        "flux": {"lag": 2, "maxSize": 3, "delta": 0.35, "waitMs": 40.0, "minDb": -45.0},
+        "swell": {"bandHz": [300.0, 10000.0], "medianSeconds": 2.0, "excessFactor": 1.5, "verticalFrames": 9, "smoothFrames": 25,
+                  "pickPreMs": 300.0, "pickAvgMs": 1500.0, "deltaDb": 8.0, "waitMs": 750.0, "onsetFraction": 0.15},
+        "grid": {"subdivision": 4, "guardMs": 25.0, "keepIfExcessDb": 6.0, "excessBandHz": [2000.0, 16000.0]},
+        "mergeMs": 40.0, "windowPreSeconds": 0.03, "windowMaxSeconds": 3.0, "windowTailSeconds": 0.08, "endDb": 30.0,
+        "minEventDb": -40.0, "maxEvents": 64},
+    "classify": {
+        "transientAttackMs": 5.0, "swellAttackMs": 30.0, "tonalDb": 15.0, "flatNoise": 0.25, "lowShare": 0.5, "lowShareImpact": 0.25,
+        "centroidSlopeUp": 0.35, "centroidSlopeDown": -0.35, "clickMaxSeconds": 0.05, "tickMaxSeconds": 0.02, "tickMinHz": 3000.0,
+        "popMaxSeconds": 0.12, "blipMaxSeconds": 0.2, "seriesMinAttacks": 4, "keyboardRateHz": [5.0, 16.0], "glitchMinAttacks": 6,
+        "swipeMaxSeconds": 0.25, "swooshMaxSeconds": 0.4, "riserMinSeconds": 1.0, "boomMinSeconds": 0.8, "subdropMinSeconds": 0.5,
+        "dingMinSeconds": 0.2, "shimmerMinCentroidHz": 3500.0, "reverseLatePeak": 0.75, "triggerPeakFraction": 0.6, "subdropFlatMax": 0.05,
+        "periodicCv": 0.15},
+    "fit": {"workers": 16, "fitSeeds": [202, 203, 204, 205], "evalSeeds": [303, 304, 305, 306], "targetSeed": 101,
+            "cmaBudget": 360, "cmaSigma0": 0.2, "cmaSeeds": [7, 8], "nelderMeadEval": 120, "starts": ["descriptors", "centre", "cma"],
+            "polishTol": 0.001, "maxEventsFit": 64},
+    "music": {"hopMs": 10.0, "minBpm": 60.0, "maxBpm": 180.0, "lowPassHz": 150.0, "sectionSeconds": 1.0, "sectionKernelBeats": 8,
+              "sectionMinBeats": 8, "sectionMax": 8, "energyWindowS": 3.0, "energyHopS": 0.5, "keyHarmonicStems": ["bass", "other"],
+              "krumhanslMajor": [6.35, 2.23, 3.48, 2.33, 4.38, 4.09, 2.52, 5.19, 2.39, 3.66, 2.29, 2.88],
+              "krumhanslMinor": [6.33, 2.68, 3.52, 5.38, 2.60, 3.53, 2.54, 4.75, 3.98, 2.69, 3.34, 3.17],
+              "progressions": {"major": [[0, 7, 9, 5], [0, 5, 7, 5], [9, 5, 0, 7]], "minor": [[0, 8, 3, 10], [0, 5, 8, 7], [0, 10, 8, 10]]},
+              "beatsPerBar": 4, "barsPerChord": 1, "seed": 4242,
+              "kick": {"fStart": 160.0, "fEnd": 48.0, "dropMs": 35.0, "decayMs": 260.0, "clickLevel": 0.15, "level": 0.9},
+              "hat": {"decayMs": 25.0, "hpHz": 7000.0, "level": 0.12, "steps": [2, 6, 10, 14]},
+              "snare": {"decayMs": 140.0, "toneHz": 190.0, "noiseLp": 7000.0, "level": 0.35, "steps": [4, 12]},
+              "bass": {"octave": 1, "decayMs": 400.0, "level": 0.32, "drive": 1.5, "lpHz": 900.0},
+              "pad": {"octave": 4, "detuneCents": 9.0, "voices": 3, "lpHz": 3500.0, "level": 0.11, "gateSteps": 2, "gateDuty": 0.6},
+              "pump": {"depth": 0.75, "releaseMs": 220.0},
+              "energyGainRangeDb": 18.0, "sectionsNoKickBelowEnergy": 0.0, "kickPresenceDb": -18.0,
+              "scoreTempoJndPct": 1.0, "scoreBoundaryBeats": 2.0},
+    "mix": {"targetFromReference": True, "fallbackLufs": -14.0, "truePeakCeilingDbtp": -1.0, "oversample": 4, "lookaheadMs": 5.0,
+            "releaseMs": 80.0, "duckDepthDb": 4.0, "duckAttackMs": 5.0, "duckReleaseMs": 150.0, "shortTermWindowS": 3.0,
+            "shortTermHopS": 0.5, "sfxOverMusicDefaultDb": -6.0, "maxIterations": 6, "lufsJnd": 1.0},
+    "verify": {"frameSeconds": 0.016667, "timingSlackMs": 1.0, "matchWindowMs": 120.0, "missingScore": 0.0, "mixTarget": 0.99,
+               "sfxWeights": "loudness"},
+}
+
+if __name__ == "__main__":
+    if OUT.exists() and "--force" not in sys.argv:
+        raise SystemExit(f"{OUT} exists; it is the source of truth now (use --force to overwrite)")
+    OUT.parent.mkdir(parents=True, exist_ok=True)
+    OUT.write_text(json.dumps(DATA, indent=2) + "\n", encoding="utf-8")
+    print(OUT)

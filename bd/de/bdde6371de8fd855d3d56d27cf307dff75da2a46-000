@@ -1,0 +1,95 @@
+{
+  "id": "kick",
+  "family": "drum",
+  "description": "Kick drum: exponential pitch drop sine body with 60 dB decay and a band-passed noise click. (12 October 2026)",
+  "tags": [
+    "drum",
+    "kick",
+    "transient",
+    "low",
+    "pitch drop"
+  ],
+  "sources": [
+    {
+      "what": "pitch-drop oscillator and filtered noise click",
+      "url": null,
+      "licence": "original (derived from the mathematics, no code copied)"
+    }
+  ],
+  "licence": "original",
+  "params": [
+    {
+      "name": "start_hz",
+      "unit": "Hz",
+      "min": 60.0,
+      "max": 1000.0,
+      "default": 220.0,
+      "scale": "log",
+      "description": "pitch at the hit"
+    },
+    {
+      "name": "end_hz",
+      "unit": "Hz",
+      "min": 25.0,
+      "max": 200.0,
+      "default": 50.0,
+      "scale": "log",
+      "description": "pitch after the drop"
+    },
+    {
+      "name": "pitch_tau_s",
+      "unit": "s",
+      "min": 0.003,
+      "max": 0.2,
+      "default": 0.03,
+      "scale": "log",
+      "description": "time constant of the pitch drop"
+    },
+    {
+      "name": "decay_s",
+      "unit": "s (T60)",
+      "min": 0.05,
+      "max": 2.0,
+      "default": 0.5,
+      "scale": "log",
+      "description": "body time to fall 60 dB"
+    },
+    {
+      "name": "click_db",
+      "unit": "dB re body",
+      "min": -40.0,
+      "max": 0.0,
+      "default": -12.0,
+      "scale": "lin",
+      "description": "click level"
+    },
+    {
+      "name": "click_hz",
+      "unit": "Hz",
+      "min": 1000.0,
+      "max": 12000.0,
+      "default": 4000.0,
+      "scale": "log",
+      "description": "click band centre"
+    },
+    {
+      "name": "amp_db",
+      "unit": "dBFS",
+      "min": -60.0,
+      "max": 0.0,
+      "default": -10.0,
+      "scale": "lin",
+      "description": "peak level of the main layer"
+    },
+    {
+      "name": "onset_s",
+      "unit": "s",
+      "min": 0.0,
+      "max": 0.2,
+      "default": 0.02,
+      "scale": "lin",
+      "description": "start time in the window"
+    }
+  ],
+  "date": "12 October 2026"
+}

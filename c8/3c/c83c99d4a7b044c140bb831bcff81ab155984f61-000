@@ -1,0 +1,52 @@
+# 12 October 2026 (A1): rerun selected recover cases of VerifySoundBank (same target sets, same fitter), in parallel,
+# to iterate on one block without the whole bank. Not a verifier: VerifySoundBank stays the only verdict.
+# Usage: python -I Scripts/FitBankCases.py block[:case[,case]] [block[:case]] ... [--workers 8] [--json out.json]
+#   case is 0 (defaults) .. bank.verify.randomSets; no case list means every case of the block.
+# FR : relance ciblée des cas « retrouve ses paramètres » d'un bloc, pour itérer vite ; le verdict reste VerifySoundBank.
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import sys
+import time
+from concurrent.futures import ProcessPoolExecutor
+from pathlib import Path
+
+os.environ.setdefault("OMP_NUM_THREADS", "1")
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from zrmd.audio import config  # noqa: E402
+import VerifySoundBank as V  # noqa: E402
+
+
+def main() -> int:
+    ap = argparse.ArgumentParser()
+    ap.add_argument("specs", nargs="+")
+    ap.add_argument("--workers", type=int, default=8)
+    ap.add_argument("--json", default="")
+    a = ap.parse_args()
+    v = config.get("bank.verify")
+    jobs = []
+    for spec in a.specs:
+        bid, _, cases = spec.partition(":")
+        sets = V.target_sets(bid, v["randomSets"], v["seed"])
+        idx = [int(c) for c in cases.split(",")] if cases else range(len(sets))
+        jobs += [{"target": bid, "params": sets[i], "fit": bid, "case": i, "expect": "recover", "seconds": v["seconds"]} for i in idx]
+    t0 = time.time()
+    with ProcessPoolExecutor(max_workers=a.workers) as ex:
+        res = list(ex.map(V.run_case, jobs))
+    for r in res:
+        flag = "OK " if r["score"] >= v["recoverMin"] else "RED"
+        print(f"{flag} {r['target']}#{r['case']} ploss {r['score']:8.3f} b1 {r['b1Score']} {r['seconds']} s starts {r['starts']} {r.get('exception', '')}")
+        print("    errors", r["errors"])
+        for k, x in r["params"].items():
+            print(f"    {k:16s} {x:11.5f} {r['fitted'].get(k, float('nan')):11.5f}")
+    print(f"total {time.time() - t0:.0f} s")
+    if a.json:
+        Path(a.json).write_text(json.dumps(res, indent=1))
+    return 0 if all(r["score"] >= v["recoverMin"] for r in res) else 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())

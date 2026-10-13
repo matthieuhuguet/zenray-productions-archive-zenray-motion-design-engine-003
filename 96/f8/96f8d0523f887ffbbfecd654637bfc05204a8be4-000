@@ -1,0 +1,46 @@
+#!/usr/bin/env python3
+# 12 October 2026 (A3): one-off migration of the calibration cache after the screen key stopped depending on
+# calibrate.dfitOverrides. Each screen fit whose key matches the previous formula is appended again under the new key
+# (nothing is rewritten or removed, fits.jsonl stays append only). Usage: python -I Scripts/RekeyCalibrationCache.py
+# FR : migration unique de la cle des fits de tri, en ajout seulement.
+import hashlib
+import json
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+import CalibrateSoundBank as C  # noqa: E402
+from zrmd.audio import config  # noqa: E402
+
+
+def old_hash() -> str:
+    cf, c = config.cfg(), C.cal()
+    blob = json.dumps({"o": c["dfitOverrides"], "d": cf["dfit"], "p": cf["ploss"], "m": c.get("metric", "official"),
+                       "so": c["screenOverrides"]}, sort_keys=True)
+    return hashlib.sha256(blob.encode()).hexdigest()[:16]
+
+
+def main() -> int:
+    path = Path(C.cal()["dir"]) / "fits.jsonl"
+    cache = C.load_cache(path)
+    hashes, old, new = {}, old_hash(), C.settings_hash("screen")
+    added = 0
+    with open(path, "a", encoding="utf-8") as fh:
+        for r in list(cache.values()):
+            if r.get("stage") != "screen":
+                continue
+            for b in r["chain"]:
+                hashes.setdefault(b, C.block_hash(b))
+            if C.job_key(r["sound"], r["chain"], r["warm"], hashes, old, "screen") != r["key"]:
+                continue
+            k = C.job_key(r["sound"], r["chain"], r["warm"], hashes, new, "screen")
+            if k not in cache:
+                fh.write(json.dumps({**r, "key": k}, ensure_ascii=False) + "\n")
+                added += 1
+    print(json.dumps({"oldHash": old, "newScreenHash": new, "rekeyed": added}))
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

@@ -1,0 +1,247 @@
+#!/usr/bin/env python3
+# 12 October 2026: reproduce the sound of a reference in code (R03 pipeline A2 to A10), one versioned output.
+#   ReproduceSound.py --slug onekey-pro-2 --out /Users/zenray/.claude/tmp/tmp-zenray-motion-design/sound/onekey-pro-2 \
+#       [--start S --end E] [--window S02:4.933:6.283] [--set fit.cmaBudget=720] [--note "..."] [--no-warm]
+# --out is the sound folder of the reference; the next V_NNN is created there (never overwritten). The Demucs stems
+# must exist in the reference cache (measurement only). Outputs: sfx.wav, music.wav, mix.wav (ours only, 48 kHz
+# 24-bit), events.json (times, classes, parameters, scores), music.json (numbers), sound-fidelity.json; exit code 0
+# when the full-length sound and music scores pass the threshold, 1 otherwise, 2 on a usage error.
+# FR : reproduit le son d'une reference en code ; une version par passe ; aucune donnee audio de la reference en sortie.
+import os
+
+for _k in ("OMP_NUM_THREADS", "VECLIB_MAXIMUM_THREADS", "OPENBLAS_NUM_THREADS", "MKL_NUM_THREADS"):
+    os.environ.setdefault(_k, "1")
+import argparse
+import json
+import sys
+import time
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(ROOT))
+
+
+def parse_set(items):
+    over = {}
+    for item in items or []:
+        key, _, raw = item.partition("=")
+        try:
+            value = json.loads(raw)
+        except json.JSONDecodeError:
+            value = raw
+        node = over
+        parts = key.split(".")
+        for part in parts[:-1]:
+            node = node.setdefault(part, {})
+        node[parts[-1]] = value
+    return over
+
+
+def main():
+    ap = argparse.ArgumentParser(description="Reproduce the sound of a reference in code")
+    ap.add_argument("--slug", required=True)
+    ap.add_argument("--out", required=True, help="sound folder of the reference; V_NNN is created inside")
+    ap.add_argument("--start", type=float)
+    ap.add_argument("--end", type=float)
+    ap.add_argument("--window", action="append", default=[], help="NAME:START:END, an extra report window")
+    ap.add_argument("--set", action="append", default=[], help="override a sfx-params.json value for this run, a.b=json")
+    ap.add_argument("--note", default="")
+    ap.add_argument("--no-warm", action="store_true", help="do not start from the previous version's parameters")
+    ap.add_argument("--workers", type=int)
+    args = ap.parse_args()
+    overrides = parse_set(args.set)
+    if overrides:
+        os.environ["ZRMD_SFX_OVERRIDES"] = json.dumps(overrides)
+
+    import numpy as np
+
+    from zrmd import settings, versions
+    from zrmd.audio import classify, config, fit, mix, music, segment, verify
+    from zrmd.audio import describe as D
+    from zrmd.audio.recipes import REGISTRY
+    from zrmd.media import load_audio, write_wav
+
+    cfg = config.cfg()
+    sr = cfg["audio"]["sampleRate"]
+    stem_dir = settings.path("refcache") / args.slug / "stems" / "out" / "htdemucs" / "mix"
+    mix_path = settings.path("refcache") / args.slug / "stems" / "mix.wav"
+    if not stem_dir.exists() or not mix_path.exists():
+        print(f"missing Demucs stems in {stem_dir} (run the separation first, one torch task at a time)", file=sys.stderr)
+        sys.exit(2)
+    out_root = Path(args.out)
+    name = versions.next_version(out_root)
+    vdir = out_root / name
+    vdir.mkdir(parents=True, exist_ok=False)
+    previous = versions.list_versions(out_root)[:-1]
+    parent = previous[-1] if previous else None
+    t_all = time.time()
+    log = {}
+
+    # A0 to A2: measure the reference (numbers only).
+    t = time.time()
+    ref_stems = {k: load_audio(stem_dir / f"{k}.wav", sr, mono=True)[0].astype(np.float64) for k in ("drums", "bass", "other")}
+    ref_mix = load_audio(mix_path, sr, mono=False)[0].astype(np.float64)
+    n = len(ref_mix)
+    ref_stems = {k: v[:n] for k, v in ref_stems.items()}
+    ref_music = music.analyze(ref_stems, sr)
+    log["analyzeS"] = round(time.time() - t, 1)
+
+    # A3 to A5: segment, describe, classify.
+    t = time.time()
+    seg = segment.detect(ref_stems, sr, ref_music)
+    lo, hi = args.start or 0.0, args.end or n / sr
+    events, refs, musical, items, backgrounds, windows = [], {}, [], [], {}, {}
+    for e in seg["events"]:
+        if not (lo <= e["t"] < hi):
+            continue
+        # Describe on the stem the event was detected on (less music bleed than the summed bed).
+        y = sum(ref_stems[k] for k in e["stem"].split("+"))
+        x = y[int(e["windowStart"] * sr):int(e["windowEnd"] * sr)]
+        d = D.describe(x)
+        tonal = d["prominenceDb"] >= cfg["classify"]["tonalDb"]
+        items.append({"e": e, "x": x, "desc": d, "t": e["t"], "stem": e["stem"], "notes": classify.notes_of(x, sr) if tonal else []})
+    routes = classify.route_musical(items, ref_music["key"])
+    for it, route in zip(items, routes):
+        e, x, d = it["e"], it["x"], it["desc"]
+        if route:
+            musical.append(dict(e, **route))
+            continue
+        if cfg["fit"]["useBackground"] and e.get("backgroundShiftS") is not None:
+            y = sum(ref_stems[k] for k in e["stem"].split("+"))
+            a0 = int((e["windowStart"] + e["backgroundShiftS"]) * sr)
+            backgrounds[e["id"]] = y[a0:a0 + len(x)].copy()
+        ext = D.extra(x, d)
+        d["harmonicity"] = ext["harmonicity"]  # read by the fit's descriptor start (not a score cue)
+        c = classify.classify(d, ext)
+        e2 = dict(e, kind=c["kind"], why=c["why"], alternatives=cfg["classify"]["alternatives"].get(c["kind"], []),
+                  anchorS=round(e["windowStart"] + D.anchor_of(d, d["anchorKind"]), 4), refAnchorKind=d["anchorKind"],
+                  levelDb=round(d["levelDb"], 2), descriptors=D.summary(d, ext))
+        events.append(e2)
+        refs[e["id"]] = d
+        windows[e["id"]] = x  # 12 October 2026 (A4): the reference window on its own stem, the dfit target (analysis only)
+    log["segmentS"] = round(time.time() - t, 1)
+
+    # A6: fit, warm-started from the previous version when it exists.
+    t = time.time()
+    warm = None
+    if previous and not args.no_warm:
+        # Warm start from the best earlier version per event (a failed variant never becomes the base).
+        # FR : on repart du meilleur resultat deja obtenu pour chaque evenement, jamais d'une variante ratee.
+        # Events are matched by time (ids shift when the detection changes), within warmMatchMs.
+        warm = {}
+        for vname in previous:
+            prev = versions.read_json(out_root / vname / "events.json", {}) or {}
+            for r in prev.get("events", []):
+                f_ = r.get("fit")
+                if not f_:
+                    continue
+                for e in events:
+                    if abs(e["t"] - r["t"]) <= cfg["fit"]["warmMatchMs"] / 1000.0:
+                        if e["id"] not in warm or f_.get("score", 0) > warm[e["id"]].get("score", 0):
+                            warm[e["id"]] = dict(f_, fromVersion=vname, fromId=r["id"])
+    # 12 October 2026 (A4): fit.fitter selects the path, "dfit" (bank chains fitted 1:1 on each window, default) or
+    # "recipes" (the B1 path). For dfit the warm start of an event joins its best earlier chain (by its stored score)
+    # and its best earlier recipe (by the B1 score), since the two scores are different numbers.
+    # FR : fit.fitter choisit le chemin ; le départ à chaud réunit la meilleure chaîne et la meilleure recette.
+    fitter_used = fit.fitter_name()
+    if fitter_used == "dfit":
+        wd = {}
+        for vname in previous if (previous and not args.no_warm) else []:
+            prev = versions.read_json(out_root / vname / "events.json", {}) or {}
+            for r in prev.get("events", []):
+                f_ = r.get("fit")
+                if not f_:
+                    continue
+                for e in events:
+                    if abs(e["t"] - r["t"]) > cfg["fit"]["warmMatchMs"] / 1000.0:
+                        continue
+                    slot = wd.setdefault(e["id"], {})
+                    chain_fit = f_ if f_.get("chain") else f_.get("recipeKeptOver")
+                    if chain_fit and chain_fit.get("chain") and chain_fit.get("score", 0) > slot.get("chainScore", -1):
+                        slot["chain"], slot["chainScore"], slot["chainFrom"] = chain_fit["chain"], chain_fit.get("score", 0), vname
+                    if f_.get("kind") in REGISTRY and f_.get("params") and f_.get("b1Shipped", f_.get("score", 0)) > slot.get("recipeScore", -1):
+                        slot.update({k: f_[k] for k in ("kind", "params", "offsetS", "renderSeed") if k in f_})
+                        slot["score"] = f_.get("b1Shipped", f_.get("score", 0))
+                        slot["recipeScore"], slot["fromVersion"] = slot["score"], vname
+        fits = fit.run_dfit(events, windows, workers=args.workers, warm=wd, log=lambda m: print(m, file=sys.stderr, flush=True))
+    else:
+        fits = fit.run(events, refs, workers=args.workers, warm=warm, backgrounds=backgrounds)
+    by_id = {r["event"]: r for r in fits}
+    log["fitS"] = round(time.time() - t, 1)
+
+    # A7: render the SFX bus (our synthesis only), swipe pans applied here.
+    sfx_st = np.zeros((n, 2))
+    sfx_mono = np.zeros(n)
+    sfx_by_stem = {}
+    pre = cfg["audio"]["preRollSeconds"]
+    for e in events:
+        r = by_id.get(e["id"])
+        if not r:
+            continue
+        if r.get("chain"):
+            # 12 October 2026 (A4): a bank chain covers the whole event window, so it starts at the window start.
+            from zrmd.audio import bank as _bank
+            body = _bank.render_chain(r["chain"]).astype(np.float64)
+            a = int(round(e["windowStart"] * sr))
+        else:
+            body = REGISTRY[r["kind"]].render(r["params"], r.get("renderSeed", cfg["fit"]["targetSeed"]), sr).astype(np.float64)
+            a = int(round((e["windowStart"] + pre + r["offsetS"]) * sr))
+        if a >= n:
+            continue
+        a0 = max(a, 0)
+        body = body[a0 - a:][: n - a0]
+        sfx_mono[a0:a0 + len(body)] += body
+        # Per-stem copy, for measurement only: each event is read on the track of its own stem, as in the reference.
+        sfx_by_stem.setdefault(e["stem"], np.zeros(n))[a0:a0 + len(body)] += body
+        st = mix.pan_stereo(body, r["params"].get("pan0", 0.0), r["params"].get("pan1", 0.0)) if r["kind"] == "swipe" else mix.to_stereo(body)  # L = R = body, so the mono downmix equals the fitted mono level
+        sfx_st[a0:a0 + len(body)] += st
+
+    # A8: original music on the measured grid.
+    t = time.time()
+    gen = music.generate(ref_music, sr)
+    gen_stems = {k: v[:n] if len(v) >= n else np.pad(v, (0, n - len(v))) for k, v in gen["stems"].items()}
+    gen_music = music.analyze(gen_stems, sr)
+    log["musicS"] = round(time.time() - t, 1)
+
+    # A9: mix toward the reference numbers.
+    ref_meas = mix.measure_reference(ref_stems, sr, [dict(e, kind=by_id[e["id"]]["kind"] if by_id[e["id"]]["kind"] != "chain" else e["kind"]) for e in events if e["id"] in by_id])
+    ref_meas["integratedLufs"] = verify.loudness.integrated(ref_mix, sr)
+    mixed = mix.mix(gen_stems, sfx_st, sr, ref_meas, [dict(e, kind=by_id[e["id"]]["kind"] if by_id[e["id"]]["kind"] != "chain" else e["kind"]) for e in events if e["id"] in by_id])
+
+    # A10: verify, full length then each window.
+    ref_pack = {"mix": ref_mix, "events": events, "music": ref_music}
+    gen_pack = {"mix": mixed["mix"], "sfx": sfx_mono, "events": by_id, "music": gen_music, "backgrounds": backgrounds,
+                "sfxByStem": sfx_by_stem}
+    windows = {"full": (lo, hi)}
+    for w in args.window:
+        wname, ws, we = w.split(":")
+        windows[wname] = (float(ws), float(we))
+    reports = {k: verify.report(ref_pack, gen_pack, sr, a, b) for k, (a, b) in windows.items()}
+
+    a, b = int(lo * sr), int(hi * sr)
+    write_wav(vdir / "sfx.wav", sfx_st[a:b], sr)
+    write_wav(vdir / "music.wav", mixed["music"][a:b], sr)
+    write_wav(vdir / "mix.wav", mixed["mix"][a:b], sr)
+    clean = lambda e: {k: v for k, v in e.items() if k not in ("descriptors",)} | {"descriptors": e["descriptors"]}
+    versions.write_json(vdir / "events.json", {"date": versions.stamp(), "slug": args.slug, "span": [lo, hi], "candidates": seg["candidates"],
+                                               "droppedAsMusic": seg["droppedOnGrid"], "routedToMusicAsNotes": musical,
+                                               "events": [dict(clean(e), fit=by_id.get(e["id"])) for e in events]})
+    versions.write_json(vdir / "music.json", {"date": versions.stamp(), "reference": {k: v for k, v in ref_music.items() if k not in ("beats", "beatLevels")},
+                                              "generated": {"plan": gen["plan"], "progression": gen["progression"], "key": gen["key"], "seed": gen["seed"]},
+                                              "generatedAnalysis": {k: v for k, v in gen_music.items() if k not in ("beats", "beatLevels")}})
+    fidelity = {"date": versions.stamp(), "slug": args.slug, "version": name, "parent": parent, "reports": reports,
+                "mix": {"stemGainsDb": mixed["stemGainsDb"], "duckDb": mixed["duckDb"], "integratedLufs": round(mixed["integratedLufs"], 2),
+                        "truePeakDbtp": round(mixed["truePeakDbtp"], 2), "referenceLufs": round(ref_meas["integratedLufs"], 2)},
+                "timing": log, "seconds": round(time.time() - t_all, 1), "overrides": overrides,
+                "rights": "outputs are our synthesis only; the reference contributed numbers (times, descriptors, loudness), never samples"}
+    versions.write_json(vdir / "sound-fidelity.json", fidelity)
+    versions.write_json(vdir / "version.json", {"version": name, "parent": parent, "created": versions.stamp(), "note": args.note,
+                                                "overrides": overrides, "warm": bool(warm), "fitter": fitter_used})
+    full = reports["full"]["scores"]
+    print(json.dumps({"version": str(vdir), "events": len(events), "scores": {k: r["scores"] for k, r in reports.items()},
+                      "seconds": fidelity["seconds"]}, indent=1))
+    sys.exit(0 if reports["full"]["pass"] else 1)
+
+
+if __name__ == "__main__":
+    main()

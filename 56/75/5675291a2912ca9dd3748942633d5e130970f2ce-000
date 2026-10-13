@@ -1,0 +1,169 @@
+{
+  "id": "drum_step_pattern",
+  "family": "drum",
+  "description": "Drum step pattern: four hits on a regular grid, each a pitched body plus a noise band with its own levels (a fragment of a drum part). (12 October 2026)",
+  "tags": [
+    "drum",
+    "pattern",
+    "kick",
+    "snare",
+    "hat",
+    "grid",
+    "loop"
+  ],
+  "sources": [
+    {
+      "what": "pitched sine body with pitch drop plus band-passed noise, exact delays",
+      "url": null,
+      "licence": "original (derived from the mathematics, no code copied)"
+    }
+  ],
+  "licence": "original",
+  "params": [
+    {
+      "name": "onset_s",
+      "unit": "s",
+      "min": 0.0,
+      "max": 0.25,
+      "default": 0.02,
+      "scale": "lin",
+      "description": "start time in the window"
+    },
+    {
+      "name": "step_s",
+      "unit": "s",
+      "min": 0.06,
+      "max": 0.5,
+      "default": 0.17,
+      "scale": "log",
+      "description": "time between two hits (a sixteenth at 88 BPM is 0.170 s)"
+    },
+    {
+      "name": "body_hz",
+      "unit": "Hz",
+      "min": 30.0,
+      "max": 400.0,
+      "default": 60.0,
+      "scale": "log",
+      "description": "body pitch after the drop"
+    },
+    {
+      "name": "drop_st",
+      "unit": "semitones",
+      "min": 0.0,
+      "max": 36.0,
+      "default": 12.0,
+      "scale": "lin",
+      "description": "pitch drop of the body from the hit"
+    },
+    {
+      "name": "body_t60",
+      "unit": "s (T60)",
+      "min": 0.03,
+      "max": 0.5,
+      "default": 0.25,
+      "scale": "log",
+      "description": "body decay"
+    },
+    {
+      "name": "noise_hz",
+      "unit": "Hz",
+      "min": 300.0,
+      "max": 12000.0,
+      "default": 3000.0,
+      "scale": "log",
+      "description": "noise band centre"
+    },
+    {
+      "name": "noise_t60",
+      "unit": "s (T60)",
+      "min": 0.01,
+      "max": 0.4,
+      "default": 0.08,
+      "scale": "log",
+      "description": "noise decay"
+    },
+    {
+      "name": "b1_db",
+      "unit": "dB",
+      "min": -40.0,
+      "max": 0.0,
+      "default": 0.0,
+      "scale": "lin",
+      "description": "body level of hit 1"
+    },
+    {
+      "name": "b2_db",
+      "unit": "dB",
+      "min": -40.0,
+      "max": 0.0,
+      "default": -40.0,
+      "scale": "lin",
+      "description": "body level of hit 2"
+    },
+    {
+      "name": "b3_db",
+      "unit": "dB",
+      "min": -40.0,
+      "max": 0.0,
+      "default": -10.0,
+      "scale": "lin",
+      "description": "body level of hit 3"
+    },
+    {
+      "name": "b4_db",
+      "unit": "dB",
+      "min": -40.0,
+      "max": 0.0,
+      "default": -40.0,
+      "scale": "lin",
+      "description": "body level of hit 4"
+    },
+    {
+      "name": "n1_db",
+      "unit": "dB",
+      "min": -40.0,
+      "max": 0.0,
+      "default": -20.0,
+      "scale": "lin",
+      "description": "noise level of hit 1"
+    },
+    {
+      "name": "n2_db",
+      "unit": "dB",
+      "min": -40.0,
+      "max": 0.0,
+      "default": -6.0,
+      "scale": "lin",
+      "description": "noise level of hit 2"
+    },
+    {
+      "name": "n3_db",
+      "unit": "dB",
+      "min": -40.0,
+      "max": 0.0,
+      "default": -20.0,
+      "scale": "lin",
+      "description": "noise level of hit 3"
+    },
+    {
+      "name": "n4_db",
+      "unit": "dB",
+      "min": -40.0,
+      "max": 0.0,
+      "default": -6.0,
+      "scale": "lin",
+      "description": "noise level of hit 4"
+    },
+    {
+      "name": "amp_db",
+      "unit": "dBFS",
+      "min": -60.0,
+      "max": 0.0,
+      "default": -14.0,
+      "scale": "lin",
+      "description": "peak level of the main layer"
+    }
+  ],
+  "date": "12 October 2026"
+}

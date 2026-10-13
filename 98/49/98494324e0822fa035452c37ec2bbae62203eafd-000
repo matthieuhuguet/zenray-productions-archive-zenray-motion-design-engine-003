@@ -1,0 +1,51 @@
+# 12 October 2026: pad_saw, two detuned saws and a sine sub one octave down through a resonant lowpass whose cutoff
+# glides exponentially from cutoff_start_hz to cutoff_end_hz, with a slow attack. FR : nappe soustractive.
+import math
+
+import torch
+
+from zrmd.audio.bank import Block, db_to_amp, envelope, stft_filter
+from zrmd.audio import fxdsp as F
+from zrmd.audio.fxdsp import param as P
+
+META = {"family": "subtractive", "kind": "source",
+        "description": "Two detuned saws plus a sub sine, resonant lowpass gliding from a start to an end cutoff, slow attack. Pads, swells, ambient beds. (12 October 2026)",
+        "tags": ["tonal", "pad", "saw", "sub", "swell", "subtractive"],
+        "sources": [{"what": "polyBLEP oscillator", "url": None, "reference": "Valimaki and Huovilainen 2007", "licence": F.SOURCE}, F.RBJ],
+        "licence": "original"}
+
+
+class PadSaw(Block):
+    ID = "pad_saw"
+    # 12 October 2026 (A2): fit hints measured on the failed cases of the first A2 verification (docs/build/
+    # A2-tonal-effects.md): a larger search budget, and coupled groups for the evolution strategy. FR : indications.
+    FIT = {"scanRounds": 6, "polishRounds": 12, "starts": 12, "screenSamples": 1024}
+    PARAMS = [
+        P("f0_hz", "Hz", 40, 1000, 110, "log", "pitch"),
+        P("detune_cents", "cents", 0.5, 30.0, 8.0, "log", "detune of the second saw"),
+        P("sub_db", "dB", -40, 0, -8, "lin", "sine one octave down"),
+        P("cutoff_start_hz", "Hz", 100, 8000, 600, "log", "cutoff at the onset"),
+        P("cutoff_end_hz", "Hz", 100, 8000, 2400, "log", "cutoff reached after the sweep"),
+        P("sweep_s", "s", 0.05, 2.0, 0.6, "log", "cutoff glide time constant"),
+        P("q", "Q", 0.5, 6.0, 1.2, "log", "filter resonance"),
+        P("attack_s", "s", 0.005, 1.0, 0.25, "log", "linear attack"),
+        P("decay_s", "s (T60)", 0.2, 8.0, 3.0, "log", "time to fall 60 dB"),
+        P("amp_db", "dBFS", -60, 0, -12, "lin", "peak level"),
+        P("onset_s", "s", 0.0, 0.25, 0.02, "lin", "start time in the window"),
+    ]
+
+    def synth(self, v, t, sr):
+        f = v["f0_hz"] * torch.ones_like(t)
+        y = 0.5 * (F.saw(f, sr, 0.0) + F.saw(f * torch.pow(2.0, v["detune_cents"] / 1200.0), sr, 0.41))
+        y = y + db_to_amp(v["sub_db"]) * torch.sin(F.TWO_PI * 0.5 * v["f0_hz"] * t)
+
+        def mask(fr, tm):
+            k = torch.exp(-torch.clamp(tm - v["onset_s"], min=0.0) / v["sweep_s"])
+            fc = v["cutoff_end_hz"] * torch.pow(v["cutoff_start_hz"] / v["cutoff_end_hz"], k)
+            return F.biquad_mag("lowpass", fr, fc, v["q"], sr=sr)
+
+        y = stft_filter(y, mask, 1024, 256, sr) / (1.0 + db_to_amp(v["sub_db"]))
+        return F.amp(v) * F.env_of(t, v) * y
+
+
+BLOCK = PadSaw

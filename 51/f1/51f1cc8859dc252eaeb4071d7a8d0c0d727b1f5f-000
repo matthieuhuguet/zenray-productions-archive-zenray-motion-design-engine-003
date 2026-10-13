@@ -1,0 +1,60 @@
+{
+  "id": "peak_eq",
+  "family": "filter",
+  "kind": "effect",
+  "description": "One peaking equaliser band, boost or cut, frequency and Q. Tone shaping, presence, honk, scoop. (12 October 2026)",
+  "tags": [
+    "effect",
+    "eq",
+    "peaking",
+    "tone"
+  ],
+  "sources": [
+    {
+      "what": "biquad magnitude responses",
+      "url": "https://www.w3.org/TR/audio-eq-cookbook/",
+      "reference": "R. Bristow-Johnson, Audio EQ Cookbook (formulas placed in the public domain by the author)",
+      "licence": "public domain (formulas), code original"
+    }
+  ],
+  "licence": "original",
+  "params": [
+    {
+      "name": "freq_hz",
+      "unit": "Hz",
+      "min": 40.0,
+      "max": 16000.0,
+      "default": 1500.0,
+      "scale": "log",
+      "description": "band centre"
+    },
+    {
+      "name": "gain_db",
+      "unit": "dB",
+      "min": -18.0,
+      "max": 18.0,
+      "default": 9.0,
+      "scale": "lin",
+      "description": "boost (positive) or cut"
+    },
+    {
+      "name": "q",
+      "unit": "Q",
+      "min": 0.3,
+      "max": 10.0,
+      "default": 1.5,
+      "scale": "log",
+      "description": "band sharpness"
+    },
+    {
+      "name": "out_db",
+      "unit": "dB",
+      "min": -24.0,
+      "max": 12.0,
+      "default": 0.0,
+      "scale": "lin",
+      "description": "output gain"
+    }
+  ],
+  "date": "12 October 2026"
+}

@@ -1,0 +1,42 @@
+# 12 October 2026: clap, four fast noise bursts spaced by spread_ms (the hands) then a decaying noise tail, all through
+# one Gaussian band. Derived from the mathematics. FR : clap, quatre salves de bruit puis une queue.
+import torch
+
+from zrmd.audio import sfxdsp as D
+from zrmd.audio.bank import Block, db_to_amp
+
+BURSTS = [0.7, 0.8, 0.9, 1.0]
+META = D.meta("drum", "Hand clap: four band-passed noise bursts spaced by a few milliseconds, then a decaying tail.", ["drum", "clap", "transient", "noise"], "burst train of filtered noise")
+
+
+class Clap(Block):
+    ID = "clap"
+    # 12 October 2026 (A1): coupled parameters scanned jointly by dfit (see dfit scanPairs).
+    FIT = {"scanPairs": [["spread_ms", "burst_decay_s"], ["tail_db", "amp_db"]]}
+    PARAMS = [
+        D.param("center_hz", "Hz", 500, 6000, 1400, "log", "band centre"),
+        D.param("bw_oct", "octaves", 0.5, 5.0, 2.0, "log", "band width"),
+        D.param("spread_ms", "ms", 3.0, 25.0, 10.0, "log", "spacing of the bursts"),
+        D.param("burst_decay_s", "s (T60)", 0.003, 0.05, 0.012, "log", "decay of each burst"),
+        D.param("tail_decay_s", "s (T60)", 0.05, 1.0, 0.25, "log", "decay of the tail"),
+        D.param("tail_db", "dB re bursts", -30, 0, -8, "lin", "tail level"),
+        D.AMP(-12.0), D.ONSET(),
+    ]
+
+    def synth(self, v, t, sr):
+        o, dev = v["onset_s"], t.device
+        times = o + torch.arange(len(BURSTS), device=dev, dtype=torch.float32) * v["spread_ms"] / 1000.0
+        # 12 October 2026 (A1): four burst templates and one tail template, each with its own noise excerpt, placed by
+        # exact delays (sfxdsp.delay_sum), so the burst spacing has a smooth, wide basin. FR : chaque salve porte son bruit.
+        n = t.shape[0]
+        u = t[:n]
+        noise = D.stroke_noise(self, len(BURSTS) + 1, n, dev)
+        burst = D.decay(u, 0.0, v["burst_decay_s"], 0.0003)[None, :]
+        tail = D.decay(u, 0.0, v["tail_decay_s"], 0.001)[None, :]
+        tpl = torch.cat([noise[:-1] * burst, noise[-1:] * tail], 0)
+        w = torch.cat([torch.tensor(BURSTS, device=dev), db_to_amp(v["tail_db"])[None]])
+        y = D.delay_sum(tpl, torch.cat([times, times[-1:]]), w, n, sr)
+        return db_to_amp(v["amp_db"]) * D.filtered(y, lambda fr: D.band(fr, v["center_hz"], v["bw_oct"]), sr)
+
+
+BLOCK = Clap

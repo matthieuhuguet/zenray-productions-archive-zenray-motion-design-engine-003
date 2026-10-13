@@ -1,0 +1,34 @@
+# 12 October 2026: crash_cymbal, 24 inharmonic partials spread log-uniformly (R1 pattern) between lo_hz and hi_hz plus
+# high-passed noise with a long decay, and a bright band of noise near hi_hz with a faster decay. Derived from the
+# mathematics. FR : cymbale crash.
+import torch
+
+from zrmd.audio import sfxdsp as D
+from zrmd.audio.bank import Block, db_to_amp
+
+K, SALT_F, SALT_D, BRIGHT_BW_OCT = 24, 0.11, 0.37, 1.5
+META = D.meta("cymbal", "Crash cymbal: 24 inharmonic partials and high-passed noise with a long decay, plus a bright fast-decaying band.", ["cymbal", "crash", "metallic", "noise", "long"], "inharmonic partials and filtered noise")
+
+
+class CrashCymbal(Block):
+    ID = "crash_cymbal"
+    PARAMS = [
+        D.param("lo_hz", "Hz", 300, 3000, 800, "log", "lowest partial and high-pass of the wash"),
+        D.param("hi_hz", "Hz", 3000, 16000, 9000, "log", "highest partial and bright band centre"),
+        D.param("metal_db", "dB re noise", -30, 6, -6, "lin", "partials level"),
+        D.param("decay_s", "s (T60)", 0.3, 4.0, 1.8, "log", "wash decay"),
+        D.param("bright_decay_s", "s (T60)", 0.02, 0.8, 0.15, "log", "bright band decay"),
+        D.AMP(-16.0), D.ONSET(0.1, 0.01),
+    ]
+
+    def synth(self, v, t, sr):
+        o, dev, n = v["onset_s"], t.device, self.noise(t.shape[0], t.device)
+        lo, hi = torch.log2(v["lo_hz"]), torch.log2(v["hi_hz"])
+        f = torch.pow(2.0, lo + (hi - lo) * D.pattern(K, SALT_F, dev))
+        metal = D.partials(t, o, f, v["decay_s"] * (1.0 - 0.5 * D.pattern(K, SALT_D, dev)), torch.ones(K, device=dev) / K ** 0.5)
+        wash = D.filtered(n, lambda fr: D.highpass(fr, v["lo_hz"], 12.0), sr) * D.decay(t, o, v["decay_s"], 0.001)
+        bright = D.filtered(torch.roll(n, t.shape[0] // 3), lambda fr: D.band(fr, v["hi_hz"], BRIGHT_BW_OCT), sr) * D.decay(t, o, v["bright_decay_s"], 0.0005)
+        return db_to_amp(v["amp_db"]) * (wash + db_to_amp(v["metal_db"]) * metal + bright)
+
+
+BLOCK = CrashCymbal

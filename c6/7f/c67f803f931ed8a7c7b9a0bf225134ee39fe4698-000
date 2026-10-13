@@ -1,0 +1,89 @@
+{
+  "id": "marimba_bar",
+  "family": "modal",
+  "kind": "source",
+  "description": "Tuned bar modes 1, 3.99, 9.14 with an upper mode level, damping and a fixed-seed mallet click. Marimba, wood, soft UI taps. (12 October 2026)",
+  "tags": [
+    "tonal",
+    "modal",
+    "marimba",
+    "wood",
+    "mallet",
+    "tap"
+  ],
+  "sources": [
+    {
+      "what": "tuned bar overtone ratios",
+      "url": null,
+      "reference": "I. Bork, Practical tuning of xylophone bars and resonators, Applied Acoustics 46, 1995",
+      "licence": "original (derived from the published mathematics, no code copied)"
+    }
+  ],
+  "licence": "original",
+  "params": [
+    {
+      "name": "f0_hz",
+      "unit": "Hz",
+      "min": 80.0,
+      "max": 2500.0,
+      "default": 392.0,
+      "scale": "log",
+      "description": "fundamental"
+    },
+    {
+      "name": "upper_db",
+      "unit": "dB",
+      "min": -40.0,
+      "max": 0.0,
+      "default": -9.0,
+      "scale": "lin",
+      "description": "level of the 3.99 mode (the 9.14 mode sits 8 dB lower)"
+    },
+    {
+      "name": "decay_s",
+      "unit": "s (T60)",
+      "min": 0.05,
+      "max": 3.0,
+      "default": 0.8,
+      "scale": "log",
+      "description": "decay of the fundamental"
+    },
+    {
+      "name": "damp",
+      "unit": "exponent",
+      "min": 0.0,
+      "max": 2.5,
+      "default": 1.2,
+      "scale": "lin",
+      "description": "mode decay decay_s / ratio**damp"
+    },
+    {
+      "name": "mallet_db",
+      "unit": "dB",
+      "min": -50.0,
+      "max": -3.0,
+      "default": -24.0,
+      "scale": "lin",
+      "description": "level of the 4 ms mallet noise, relative"
+    },
+    {
+      "name": "amp_db",
+      "unit": "dBFS",
+      "min": -60.0,
+      "max": 0.0,
+      "default": -12.0,
+      "scale": "lin",
+      "description": "peak level"
+    },
+    {
+      "name": "onset_s",
+      "unit": "s",
+      "min": 0.0,
+      "max": 0.25,
+      "default": 0.02,
+      "scale": "lin",
+      "description": "start time in the window"
+    }
+  ],
+  "date": "12 October 2026"
+}

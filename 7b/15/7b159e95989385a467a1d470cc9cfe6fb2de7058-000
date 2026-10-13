@@ -1,0 +1,43 @@
+# 12 October 2026: wind, noise through a Gaussian band whose centre wanders by sweep_oct octaves with a slow LFO (a
+# fixed sum of three sines at lfo_hz times 1, 1.7 and 2.9) that also drives gusts in level, faded in.
+# Derived from the mathematics. FR : vent, bande de bruit qui erre et rafales.
+import math
+
+import torch
+
+from zrmd.audio import sfxdsp as D
+from zrmd.audio.bank import Block, db_to_amp
+
+LFO_RATIOS, LFO_AMPS, LFO_PHASES = [1.0, 1.7, 2.9], [0.6, 0.3, 0.2], [0.0, 1.3, 2.1]
+META = D.meta("ambience", "Wind: noise band wandering with a slow LFO that also drives gusts, faded in.", ["ambience", "wind", "air", "gust", "noise", "outdoor"], "moving filtered noise and LFO amplitude")
+
+
+def lfo(times, rate_hz):
+    s = sum(a * torch.sin(2.0 * math.pi * rate_hz * r * times + p) for r, a, p in zip(LFO_RATIOS, LFO_AMPS, LFO_PHASES))
+    return s / sum(LFO_AMPS)
+
+
+class Wind(Block):
+    ID = "wind"
+    PARAMS = [
+        D.param("center_hz", "Hz", 100, 6000, 800, "log", "mean band centre"),
+        D.param("bw_oct", "octaves", 0.5, 5.0, 1.5, "log", "band width"),
+        D.param("sweep_oct", "octaves", 0.0, 2.0, 0.8, "lin", "how far the centre wanders"),
+        D.param("lfo_hz", "Hz", 0.3, 6.0, 1.5, "log", "LFO rate"),
+        D.param("gust_depth", "0..1", 0.0, 1.0, 0.5, "lin", "level modulation by the LFO"),
+        D.param("attack_s", "s", 0.005, 0.4, 0.1, "log", "fade-in length"),
+        D.AMP(-18.0),
+    ]
+
+    def synth(self, v, t, sr):
+        sig = v["bw_oct"] / D.FWHM
+
+        def mask(freqs, times):
+            c = torch.log2(v["center_hz"]) + v["sweep_oct"] * lfo(times, v["lfo_hz"])
+            return torch.exp(-0.5 * ((D.log2f(freqs) - c) / sig) ** 2)
+
+        gust = 1.0 - v["gust_depth"] * 0.5 * (1.0 - lfo(t, v["lfo_hz"]))
+        return db_to_amp(v["amp_db"]) * torch.clamp(t / v["attack_s"], 0.0, 1.0) * gust * D.moving(self.noise(t.shape[0], t.device), mask, sr)
+
+
+BLOCK = Wind

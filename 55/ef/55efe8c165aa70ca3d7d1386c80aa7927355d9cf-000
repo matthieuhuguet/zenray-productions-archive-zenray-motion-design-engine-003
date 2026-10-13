@@ -1,0 +1,66 @@
+# 12 October 2026: reverb_fdn, an eight-line feedback delay network (Jot and Chaigne 1991) with a Householder feedback
+# matrix A = I - (2/8) 1 1^T, evaluated EXACTLY in the frequency domain so that every parameter, the room size (delay
+# lengths) included, is differentiable: with Q(w) = diag(exp(j w m_i) / g_i(w)) - I, the transfer function is
+#   H(w) = c^T (Q + (2/8) 1 1^T)^-1 b, solved in closed form by Sherman-Morrison (diagonal Q, no matrix inverse),
+# g_i(w) = 10 ** (-3 m_i / (sr T60(w))) the frequency dependent loss of line i, b = 1/sqrt(8), c = +-1/sqrt(8).
+# The grid holds n + 4 s so that the tail does not wrap. FR : réseau de lignes à retard bouclées, résolu exactement en
+# fréquence, taille de la pièce différentiable.
+import math
+
+import torch
+
+from zrmd.audio.bank import db_to_amp, stft_filter
+from zrmd.audio import fxdsp as F
+from zrmd.audio.fxdsp import EffectBlock
+from zrmd.audio.fxdsp import param as P
+
+META = {"family": "reverb", "kind": "effect",
+        "description": "Eight-line feedback delay network with a Householder matrix, exact frequency-domain evaluation (size, T60, damping, predelay, mix all differentiable). Rooms, plates, halls. (12 October 2026)",
+        "tags": ["effect", "reverb", "fdn", "room", "hall", "plate"],
+        "sources": [{"what": "feedback delay network", "url": None, "reference": "J.-M. Jot and A. Chaigne, Digital delay networks for designing artificial reverberators, AES 90th Convention, 1991", "licence": F.SOURCE}],
+        "licence": "original"}
+DELAYS_MS = [29.7, 37.1, 41.1, 43.7, 53.0, 59.9, 67.7, 73.1]
+SIGNS = [1.0, -1.0, 1.0, -1.0, 1.0, -1.0, 1.0, -1.0]
+GRID_EXTRA_S = 1.5
+
+
+class ReverbFdn(EffectBlock):
+    ID = "reverb_fdn"
+    # 12 October 2026 (A2): fit hints measured on the failed cases of the first A2 verification (docs/build/
+    # A2-tonal-effects.md): a larger search budget, and coupled groups for the evolution strategy. FR : indications.
+    FIT = {"scanRounds": 6, "polishRounds": 12, "starts": 12, "screenSamples": 1024, "scanPoints": 65,
+           "scanGroups": [["t60_s", "size", "hf_ratio"], ["mix", "out_db"], "*"]}
+    PARAMS = [
+        P("t60_s", "s", 0.1, 3.0, 1.0, "log", "decay time at low frequencies"),
+        P("hf_ratio", "x", 0.1, 1.0, 0.5, "log", "T60 at high frequencies relative"),
+        P("size", "x", 0.3, 2.0, 1.0, "log", "scales every delay line (room size)"),
+        P("predelay_s", "s", 0.0, 0.1, 0.01, "lin", "delay before the network"),
+        P("mix", "0..1", 0.0, 1.0, 0.3, "lin", "wet share, equal power"),
+        P("out_db", "dB", -24, 12, 0, "lin", "output gain"),
+    ]
+
+    def fx(self, v, x, t, sr):
+        dev = x.device
+        m = torch.tensor(DELAYS_MS, device=dev) * 1e-3 * sr * v["size"]
+        c = torch.tensor(SIGNS, device=dev) / math.sqrt(8.0)
+
+        def H(w):
+            f = w[:, None] * sr / (2.0 * math.pi)
+            t60 = v["t60_s"] * (v["hf_ratio"] + (1.0 - v["hf_ratio"]) / (1.0 + (f / 2000.0) ** 2))
+            inv_g = torch.pow(10.0, 3.0 * m[None, :] / (sr * t60))
+            q = inv_g * F.delay_phase(w[:, None] * torch.ones_like(m)[None, :], -m[None, :]) - 1.0
+            qinv = 1.0 / q
+            b = 1.0 / math.sqrt(8.0)
+            s1 = (qinv * b).sum(1)  # 1^T Q^-1 b
+            s2 = qinv.sum(1)  # 1^T Q^-1 1
+            cq_b = (c[None, :] * qinv * b).sum(1)
+            cq_1 = (c[None, :] * qinv).sum(1)
+            h = cq_b - (2.0 / 8.0) * cq_1 * s1 / (1.0 + (2.0 / 8.0) * s2)
+            return h * F.delay_phase(w, v["predelay_s"] * sr)
+
+        wet = F.apply_response(x, H, int(GRID_EXTRA_S * sr))
+        a = v["mix"] * math.pi / 2
+        return db_to_amp(v["out_db"]) * (torch.cos(a) * x + torch.sin(a) * wet)
+
+
+BLOCK = ReverbFdn

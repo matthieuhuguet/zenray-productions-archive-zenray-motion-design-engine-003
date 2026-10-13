@@ -1,0 +1,1734 @@
+{
+  "date": "12 October 2026",
+  "count": 71,
+  "blocks": [
+    {
+      "id": "additive_harmonic",
+      "family": "additive",
+      "kind": "source",
+      "description": "Twelve harmonics with tilt in dB per octave, even harmonic level and harmonic dependent decay. Organs, reeds, keys, generic pitched tones. (12 October 2026)",
+      "tags": [
+        "tonal",
+        "additive",
+        "harmonic",
+        "organ",
+        "reed",
+        "keys"
+      ],
+      "params": [
+        "f0_hz",
+        "tilt_db_oct",
+        "even_db",
+        "decay_s",
+        "decay_tilt",
+        "attack_s",
+        "amp_db",
+        "onset_s"
+      ],
+      "licence": "original"
+    },
+    {
+      "id": "bandpass_sweep",
+      "family": "filter",
+      "kind": "effect",
+      "description": "Resonant bandpass whose centre glides from a start to an end frequency. Wah, vowel and radio sweeps. (12 October 2026)",
+      "tags": [
+        "effect",
+        "filter",
+        "bandpass",
+        "sweep",
+        "wah"
+      ],
+      "params": [
+        "start_hz",
+        "end_hz",
+        "sweep_s",
+        "q",
+        "out_db"
+      ],
+      "licence": "original"
+    },
+    {
+      "id": "bass_saw",
+      "family": "bass",
+      "kind": "source",
+      "description": "polyBLEP saw through a resonant lowpass with an exponential filter envelope. Synth bass, acid plucks, low stabs. (12 October 2026)",
+      "tags": [
+        "tonal",
+        "bass",
+        "saw",
+        "acid",
+        "pluck",
+        "subtractive"
+      ],
+      "params": [
+        "f0_hz",
+        "cutoff_start_hz",
+        "cutoff_end_hz",
+        "filter_decay_s",
+        "q",
+        "decay_s",
+        "amp_db",
+        "onset_s"
+      ],
+      "licence": "original"
+    },
+    {
+      "id": "bell_modal",
+      "family": "modal",
+      "kind": "source",
+      "description": "Bell partials hum 0.5, prime 1, tierce 1.183, quint 1.506, nominal 2 and upper partials, with hum level, tilt and damping. Bells, success chimes. (12 October 2026)",
+      "tags": [
+        "tonal",
+        "modal",
+        "bell",
+        "church",
+        "chime",
+        "inharmonic"
+      ],
+      "params": [
+        "f0_hz",
+        "hum_db",
+        "tilt",
+        "decay_s",
+        "damp",
+        "amp_db",
+        "onset_s",
+        "attack_s"
+      ],
+      "licence": "original"
+    },
+    {
+      "id": "chime_bar",
+      "family": "modal",
+      "kind": "source",
+      "description": "Free-free bar modes at the Euler-Bernoulli ratios 1, 2.756, 5.404, 8.933, 13.344. Chimes, glockenspiel, metallophone hits. (12 October 2026)",
+      "tags": [
+        "tonal",
+        "modal",
+        "chime",
+        "glockenspiel",
+        "metallic",
+        "inharmonic"
+      ],
+      "params": [
+        "f0_hz",
+        "tilt",
+        "decay_s",
+        "damp",
+        "amp_db",
+        "onset_s",
+        "attack_s"
+      ],
+      "licence": "original"
+    },
+    {
+      "id": "chip_blip",
+      "family": "ui",
+      "kind": "source",
+      "description": "Chip blip: a band-limited pulse wave playing up to three discrete pitches in a row, with per-note and overall decay. (12 October 2026)",
+      "tags": [
+        "ui",
+        "blip",
+        "chip",
+        "8bit",
+        "arpeggio",
+        "coin",
+        "pickup",
+        "pulse"
+      ],
+      "params": [
+        "f0_hz",
+        "step1_st",
+        "step2_st",
+        "step_s",
+        "notes",
+        "duty",
+        "note_decay_s",
+        "decay_s",
+        "amp_db",
+        "onset_s"
+      ],
+      "licence": "original"
+    },
+    {
+      "id": "chorus",
+      "family": "modulation",
+      "kind": "effect",
+      "description": "Two-voice chorus: sine modulated fractional delays (rate, depth, base delay, mix). Thickening, detune, shimmer, vibrato at full mix. (12 October 2026)",
+      "tags": [
+        "effect",
+        "modulation",
+        "chorus",
+        "detune",
+        "vibrato"
+      ],
+      "params": [
+        "rate_hz",
+        "depth_ms",
+        "base_ms",
+        "mix",
+        "out_db"
+      ],
+      "licence": "original"
+    },
+    {
+      "id": "clap",
+      "family": "drum",
+      "kind": "source",
+      "description": "Hand clap: four band-passed noise bursts spaced by a few milliseconds, then a decaying tail. (12 October 2026)",
+      "tags": [
+        "drum",
+        "clap",
+        "transient",
+        "noise"
+      ],
+      "params": [
+        "center_hz",
+        "bw_oct",
+        "spread_ms",
+        "burst_decay_s",
+        "tail_decay_s",
+        "tail_db",
+        "amp_db",
+        "onset_s"
+      ],
+      "licence": "original"
+    },
+    {
+      "id": "click_body",
+      "family": "impact",
+      "kind": "source",
+      "description": "Click and body: a shaped noise click (centre, width, decay) in front of a pitched body with a pitch drop and its own decay. (12 October 2026)",
+      "tags": [
+        "click",
+        "tick",
+        "impact",
+        "trigger",
+        "tap",
+        "boom",
+        "transient",
+        "ui"
+      ],
+      "params": [
+        "click_hz",
+        "click_bw_oct",
+        "click_t60_s",
+        "click_db",
+        "body_hz",
+        "drop_st",
+        "drop_ms",
+        "body_t60_s",
+        "amp_db",
+        "onset_s"
+      ],
+      "licence": "original"
+    },
+    {
+      "id": "cloth_swish",
+      "family": "foley",
+      "kind": "source",
+      "description": "Cloth swish: low-passed noise under a bell envelope with a flutter amplitude modulation. (12 October 2026)",
+      "tags": [
+        "foley",
+        "cloth",
+        "fabric",
+        "swish",
+        "movement",
+        "noise"
+      ],
+      "params": [
+        "cut_hz",
+        "duration_s",
+        "peak_pos",
+        "flutter_hz",
+        "flutter_depth",
+        "amp_db",
+        "onset_s"
+      ],
+      "licence": "original"
+    },
+    {
+      "id": "compressor",
+      "family": "dynamics",
+      "kind": "effect",
+      "description": "Feed-forward RMS compressor approximation (threshold, ratio, soft knee, one time constant, makeup). Glue, sustain, pumping, levelling. (12 October 2026)",
+      "tags": [
+        "effect",
+        "dynamics",
+        "compressor",
+        "glue",
+        "sustain"
+      ],
+      "params": [
+        "threshold_db",
+        "ratio",
+        "knee_db",
+        "time_ms",
+        "makeup_db"
+      ],
+      "licence": "original"
+    },
+    {
+      "id": "crash_cymbal",
+      "family": "cymbal",
+      "kind": "source",
+      "description": "Crash cymbal: 24 inharmonic partials and high-passed noise with a long decay, plus a bright fast-decaying band. (12 October 2026)",
+      "tags": [
+        "cymbal",
+        "crash",
+        "metallic",
+        "noise",
+        "long"
+      ],
+      "params": [
+        "lo_hz",
+        "hi_hz",
+        "metal_db",
+        "decay_s",
+        "bright_decay_s",
+        "amp_db",
+        "onset_s"
+      ],
+      "licence": "original"
+    },
+    {
+      "id": "delay_echo",
+      "family": "delay",
+      "kind": "effect",
+      "description": "Feedback echo (time, feedback, per-repeat lowpass, mix), first eight repeats exact, fractional delay by phase. Echoes, slapback, dub throws. (12 October 2026)",
+      "tags": [
+        "effect",
+        "delay",
+        "echo",
+        "slapback",
+        "feedback"
+      ],
+      "params": [
+        "time_s",
+        "feedback",
+        "damp_hz",
+        "mix",
+        "out_db"
+      ],
+      "licence": "original"
+    },
+    {
+      "id": "downlifter",
+      "family": "riser",
+      "kind": "source",
+      "description": "Downlifter: noise band and sine sweeping down together while the level fades. (12 October 2026)",
+      "tags": [
+        "downlifter",
+        "drop",
+        "fall",
+        "sweep",
+        "transition"
+      ],
+      "params": [
+        "start_hz",
+        "end_hz",
+        "bw_oct",
+        "duration_s",
+        "curve",
+        "tone_db",
+        "amp_db",
+        "onset_s"
+      ],
+      "licence": "original"
+    },
+    {
+      "id": "drum_step_pattern",
+      "family": "drum",
+      "kind": "source",
+      "description": "Drum step pattern: four hits on a regular grid, each a pitched body plus a noise band with its own levels (a fragment of a drum part). (12 October 2026)",
+      "tags": [
+        "drum",
+        "pattern",
+        "kick",
+        "snare",
+        "hat",
+        "grid",
+        "loop"
+      ],
+      "params": [
+        "onset_s",
+        "step_s",
+        "body_hz",
+        "drop_st",
+        "body_t60",
+        "noise_hz",
+        "noise_t60",
+        "b1_db",
+        "b2_db",
+        "b3_db",
+        "b4_db",
+        "n1_db",
+        "n2_db",
+        "n3_db",
+        "n4_db",
+        "amp_db"
+      ],
+      "licence": "original"
+    },
+    {
+      "id": "filtered_noise_burst",
+      "family": "noise",
+      "kind": "source",
+      "description": "Fixed-seed white noise through a Gaussian log-frequency band sweeping from one centre to another, with attack and 60 dB decay. Whooshes, swishes, snares, air. (12 October 2026)",
+      "tags": [
+        "noise",
+        "band",
+        "sweep",
+        "whoosh",
+        "swish",
+        "air"
+      ],
+      "params": [
+        "center_start_hz",
+        "center_end_hz",
+        "bw_oct",
+        "amp_db",
+        "onset_s",
+        "attack_s",
+        "decay_s"
+      ],
+      "licence": "original"
+    },
+    {
+      "id": "fm_bell",
+      "family": "fm",
+      "kind": "source",
+      "description": "Two-operator FM with a decaying modulation index (Chowning 1973). Bells, dings, metallic hits. (12 October 2026)",
+      "tags": [
+        "tonal",
+        "fm",
+        "bell",
+        "ding",
+        "metallic",
+        "inharmonic"
+      ],
+      "params": [
+        "carrier_hz",
+        "ratio",
+        "index",
+        "index_decay_s",
+        "amp_db",
+        "onset_s",
+        "attack_s",
+        "decay_s"
+      ],
+      "licence": "original"
+    },
+    {
+      "id": "fm_epiano",
+      "family": "fm",
+      "kind": "source",
+      "description": "Ratio 1:1 FM tone with a decaying index plus a short 14x tine partial. Electric piano, soft keys, warm notification notes. (12 October 2026)",
+      "tags": [
+        "tonal",
+        "fm",
+        "epiano",
+        "keys",
+        "tine"
+      ],
+      "params": [
+        "f0_hz",
+        "index",
+        "index_decay_s",
+        "tine_db",
+        "tine_decay_s",
+        "decay_s",
+        "amp_db",
+        "onset_s"
+      ],
+      "licence": "original"
+    },
+    {
+      "id": "gated_tone",
+      "family": "gated",
+      "kind": "source",
+      "description": "Gated tone: a sustained harmonic tone (one pitch, tilt, odd/even balance) chopped by a periodic gate with duty, depth and smooth edges. (12 October 2026)",
+      "tags": [
+        "tonal",
+        "gate",
+        "chop",
+        "pad",
+        "lead",
+        "sustained",
+        "rhythmic"
+      ],
+      "params": [
+        "f0_hz",
+        "tilt_db_oct",
+        "odd_db",
+        "rate_hz",
+        "phase",
+        "duty",
+        "depth_db",
+        "edge_ms",
+        "release_s",
+        "amp_db",
+        "onset_s"
+      ],
+      "licence": "original"
+    },
+    {
+      "id": "glitch_stutter",
+      "family": "glitch",
+      "kind": "source",
+      "description": "Glitch stutter: deterministic grain pattern (rate, count, density, pitch spread) of soft-clipped sine grains. (12 October 2026)",
+      "tags": [
+        "glitch",
+        "stutter",
+        "digital",
+        "grain",
+        "pattern",
+        "ui"
+      ],
+      "params": [
+        "base_hz",
+        "spread_oct",
+        "grain_s",
+        "rate_hz",
+        "count",
+        "density",
+        "amp_db",
+        "onset_s"
+      ],
+      "licence": "original"
+    },
+    {
+      "id": "highpass_sweep",
+      "family": "filter",
+      "kind": "effect",
+      "description": "Resonant highpass whose cutoff glides from a start to an end frequency. Thinning builds, telephone moves, risers. (12 October 2026)",
+      "tags": [
+        "effect",
+        "filter",
+        "highpass",
+        "sweep",
+        "build"
+      ],
+      "params": [
+        "start_hz",
+        "end_hz",
+        "sweep_s",
+        "q",
+        "out_db"
+      ],
+      "licence": "original"
+    },
+    {
+      "id": "hihat_closed",
+      "family": "cymbal",
+      "kind": "source",
+      "description": "Closed hi-hat: six inharmonic square-like partials mixed with noise, high-passed, short decay. (12 October 2026)",
+      "tags": [
+        "hat",
+        "hihat",
+        "closed",
+        "cymbal",
+        "metallic",
+        "transient"
+      ],
+      "params": [
+        "base_hz",
+        "metal_db",
+        "hp_hz",
+        "decay_s",
+        "attack_s",
+        "amp_db",
+        "onset_s"
+      ],
+      "licence": "original"
+    },
+    {
+      "id": "hihat_open",
+      "family": "cymbal",
+      "kind": "source",
+      "description": "Open hi-hat: metallic partials and noise, high-passed, long decay cut by a choke. (12 October 2026)",
+      "tags": [
+        "hat",
+        "hihat",
+        "open",
+        "cymbal",
+        "metallic"
+      ],
+      "params": [
+        "base_hz",
+        "metal_db",
+        "hp_hz",
+        "decay_s",
+        "choke_s",
+        "amp_db",
+        "onset_s"
+      ],
+      "licence": "original"
+    },
+    {
+      "id": "hit_sequence",
+      "family": "foley",
+      "kind": "source",
+      "description": "Hit sequence: a roll of up to 16 hits with accelerating or slowing rate, crescendo, per-hit level and brightness spread and a pitched body under each click. (12 October 2026)",
+      "tags": [
+        "foley",
+        "keyboard",
+        "roll",
+        "fill",
+        "rattle",
+        "pattern",
+        "clicks",
+        "drum"
+      ],
+      "params": [
+        "count",
+        "rate_hz",
+        "accel",
+        "jitter",
+        "crescendo_db",
+        "level_spread_db",
+        "click_hz",
+        "bw_oct",
+        "bright_spread_oct",
+        "decay_s",
+        "body_hz",
+        "body_db",
+        "amp_db",
+        "onset_s"
+      ],
+      "licence": "original"
+    },
+    {
+      "id": "impact_layered",
+      "family": "impact",
+      "kind": "source",
+      "description": "Layered impact: low body with a short bend, band-passed click, low-passed noise tail. (12 October 2026)",
+      "tags": [
+        "impact",
+        "hit",
+        "trailer",
+        "layered",
+        "body",
+        "tail"
+      ],
+      "params": [
+        "body_hz",
+        "body_decay_s",
+        "click_db",
+        "tail_db",
+        "tail_cut_hz",
+        "tail_decay_s",
+        "amp_db",
+        "onset_s"
+      ],
+      "licence": "original"
+    },
+    {
+      "id": "key_press",
+      "family": "foley",
+      "kind": "source",
+      "description": "Key press: down click, bottom-out thock (low mode and low-passed noise), release click after a hold. (12 October 2026)",
+      "tags": [
+        "foley",
+        "keyboard",
+        "key",
+        "click",
+        "mechanical",
+        "transient"
+      ],
+      "params": [
+        "click_hz",
+        "thock_hz",
+        "decay_s",
+        "thock_db",
+        "hold_s",
+        "release_db",
+        "amp_db",
+        "onset_s"
+      ],
+      "licence": "original"
+    },
+    {
+      "id": "keyboard_typing",
+      "family": "foley",
+      "kind": "source",
+      "description": "Keyboard typing: a deterministic pattern of key clicks with count, rate, jitter and accent as parameters. (12 October 2026)",
+      "tags": [
+        "foley",
+        "keyboard",
+        "typing",
+        "pattern",
+        "clicks"
+      ],
+      "params": [
+        "count",
+        "rate_hz",
+        "jitter",
+        "accent_db",
+        "click_hz",
+        "decay_s",
+        "amp_db",
+        "onset_s"
+      ],
+      "licence": "original"
+    },
+    {
+      "id": "kick",
+      "family": "drum",
+      "kind": "source",
+      "description": "Kick drum: exponential pitch drop sine body with 60 dB decay and a band-passed noise click. (12 October 2026)",
+      "tags": [
+        "drum",
+        "kick",
+        "transient",
+        "low",
+        "pitch drop"
+      ],
+      "params": [
+        "start_hz",
+        "end_hz",
+        "pitch_tau_s",
+        "decay_s",
+        "click_db",
+        "click_hz",
+        "amp_db",
+        "onset_s"
+      ],
+      "licence": "original"
+    },
+    {
+      "id": "lowpass_sweep",
+      "family": "filter",
+      "kind": "effect",
+      "description": "Resonant lowpass whose cutoff glides from a start to an end frequency. Filter closes, muffles, underwater moves, dull downs. (12 October 2026)",
+      "tags": [
+        "effect",
+        "filter",
+        "lowpass",
+        "sweep",
+        "muffle"
+      ],
+      "params": [
+        "start_hz",
+        "end_hz",
+        "sweep_s",
+        "q",
+        "out_db"
+      ],
+      "licence": "original"
+    },
+    {
+      "id": "marimba_bar",
+      "family": "modal",
+      "kind": "source",
+      "description": "Tuned bar modes 1, 3.99, 9.14 with an upper mode level, damping and a fixed-seed mallet click. Marimba, wood, soft UI taps. (12 October 2026)",
+      "tags": [
+        "tonal",
+        "modal",
+        "marimba",
+        "wood",
+        "mallet",
+        "tap"
+      ],
+      "params": [
+        "f0_hz",
+        "upper_db",
+        "decay_s",
+        "damp",
+        "mallet_db",
+        "amp_db",
+        "onset_s"
+      ],
+      "licence": "original"
+    },
+    {
+      "id": "modal_ding",
+      "family": "modal",
+      "kind": "source",
+      "description": "Six decaying modes with stretched ratios k^stretch, spectral tilt and frequency dependent damping. Dings, glass pings, small bells. (12 October 2026)",
+      "tags": [
+        "tonal",
+        "modal",
+        "ding",
+        "inharmonic",
+        "glass",
+        "ui"
+      ],
+      "params": [
+        "f0_hz",
+        "stretch",
+        "tilt",
+        "decay_s",
+        "damp",
+        "amp_db",
+        "onset_s",
+        "attack_s"
+      ],
+      "licence": "original"
+    },
+    {
+      "id": "modal_pop",
+      "family": "modal",
+      "kind": "source",
+      "description": "Modal pop: eight inharmonic modes (stretch exponent) with per-mode decay, a body pitch drop and a noise click. (12 October 2026)",
+      "tags": [
+        "tonal",
+        "modal",
+        "pop",
+        "bubble",
+        "ding",
+        "drop",
+        "inharmonic",
+        "ui"
+      ],
+      "params": [
+        "f0_hz",
+        "stretch",
+        "tilt_db_oct",
+        "decay_s",
+        "damp",
+        "drop_st",
+        "drop_ms",
+        "click_db",
+        "amp_db",
+        "onset_s"
+      ],
+      "licence": "original"
+    },
+    {
+      "id": "noise_path",
+      "family": "whoosh",
+      "kind": "source",
+      "description": "Noise path: a noise band whose centre follows four breakpoints and whose width moves, under a rise and fall envelope. (12 October 2026)",
+      "tags": [
+        "whoosh",
+        "swoosh",
+        "swipe",
+        "reverse",
+        "noise",
+        "air",
+        "transition",
+        "sweep"
+      ],
+      "params": [
+        "c0_hz",
+        "c1_hz",
+        "c2_hz",
+        "c3_hz",
+        "bw0_oct",
+        "bw1_oct",
+        "duration_s",
+        "peak_pos",
+        "shape_pow",
+        "amp_db",
+        "onset_s"
+      ],
+      "licence": "original"
+    },
+    {
+      "id": "notify_arpeggio",
+      "family": "notification",
+      "kind": "source",
+      "description": "Three-note arpeggio (two intervals in semitones, step time), four-partial harmonic notes with tilt. Success jingles, level up, confirmations. (12 October 2026)",
+      "tags": [
+        "tonal",
+        "notification",
+        "arpeggio",
+        "success",
+        "jingle",
+        "ui"
+      ],
+      "params": [
+        "f1_hz",
+        "step1_st",
+        "step2_st",
+        "step_s",
+        "note_decay_s",
+        "tilt",
+        "amp_db",
+        "onset_s"
+      ],
+      "licence": "original"
+    },
+    {
+      "id": "notify_chirp",
+      "family": "notification",
+      "kind": "source",
+      "description": "Exponential chirp from a start to an end frequency over a duration, second harmonic, attack and decay. Swipe up, pop, zap, confirm. (12 October 2026)",
+      "tags": [
+        "tonal",
+        "chirp",
+        "sweep",
+        "swipe",
+        "zap",
+        "ui"
+      ],
+      "params": [
+        "f_start_hz",
+        "f_end_hz",
+        "dur_s",
+        "h2_db",
+        "attack_s",
+        "decay_s",
+        "amp_db",
+        "onset_s"
+      ],
+      "licence": "original"
+    },
+    {
+      "id": "notify_two_tone",
+      "family": "notification",
+      "kind": "source",
+      "description": "Two successive soft notes (fundamental plus third harmonic), interval in semitones, step time, second note level. Notifications, message received, doorbells. (12 October 2026)",
+      "tags": [
+        "tonal",
+        "notification",
+        "ui",
+        "two-tone",
+        "chime",
+        "doorbell"
+      ],
+      "params": [
+        "f1_hz",
+        "interval_st",
+        "step_s",
+        "note_decay_s",
+        "h3_db",
+        "note2_db",
+        "amp_db",
+        "onset_s"
+      ],
+      "licence": "original"
+    },
+    {
+      "id": "pad_saw",
+      "family": "subtractive",
+      "kind": "source",
+      "description": "Two detuned saws plus a sub sine, resonant lowpass gliding from a start to an end cutoff, slow attack. Pads, swells, ambient beds. (12 October 2026)",
+      "tags": [
+        "tonal",
+        "pad",
+        "saw",
+        "sub",
+        "swell",
+        "subtractive"
+      ],
+      "params": [
+        "f0_hz",
+        "detune_cents",
+        "sub_db",
+        "cutoff_start_hz",
+        "cutoff_end_hz",
+        "sweep_s",
+        "q",
+        "attack_s",
+        "decay_s",
+        "amp_db",
+        "onset_s"
+      ],
+      "licence": "original"
+    },
+    {
+      "id": "paper_rustle",
+      "family": "foley",
+      "kind": "source",
+      "description": "Paper rustle: band-passed noise with attack and decay, modulated by a crinkle signal (fixed sum of sines through a sigmoid). (12 October 2026)",
+      "tags": [
+        "foley",
+        "paper",
+        "rustle",
+        "crinkle",
+        "noise"
+      ],
+      "params": [
+        "center_hz",
+        "bw_oct",
+        "crinkle_hz",
+        "depth",
+        "duration_s",
+        "attack_s",
+        "amp_db",
+        "onset_s"
+      ],
+      "licence": "original"
+    },
+    {
+      "id": "peak_eq",
+      "family": "filter",
+      "kind": "effect",
+      "description": "One peaking equaliser band, boost or cut, frequency and Q. Tone shaping, presence, honk, scoop. (12 October 2026)",
+      "tags": [
+        "effect",
+        "eq",
+        "peaking",
+        "tone"
+      ],
+      "params": [
+        "freq_hz",
+        "gain_db",
+        "q",
+        "out_db"
+      ],
+      "licence": "original"
+    },
+    {
+      "id": "pluck_ks",
+      "family": "physical",
+      "kind": "source",
+      "description": "Karplus-Strong plucked string computed exactly in the frequency domain (fractional loop delay, averaging loop filter). Plucks, harp, koto, pizzicato UI notes. (12 October 2026)",
+      "tags": [
+        "tonal",
+        "pluck",
+        "string",
+        "karplus-strong",
+        "physical"
+      ],
+      "params": [
+        "f0_hz",
+        "decay_s",
+        "brightness",
+        "amp_db",
+        "onset_s"
+      ],
+      "licence": "original"
+    },
+    {
+      "id": "pulse_lead",
+      "family": "subtractive",
+      "kind": "source",
+      "description": "polyBLEP pulse wave with duty cycle, sine vibrato and lowpass. Chiptune and retro leads, 8-bit UI tones. (12 October 2026)",
+      "tags": [
+        "tonal",
+        "pulse",
+        "square",
+        "chiptune",
+        "lead",
+        "vibrato"
+      ],
+      "params": [
+        "f0_hz",
+        "width",
+        "cutoff_hz",
+        "vib_rate_hz",
+        "vib_cents",
+        "attack_s",
+        "decay_s",
+        "amp_db",
+        "onset_s"
+      ],
+      "licence": "original"
+    },
+    {
+      "id": "pumped_bass",
+      "family": "bass",
+      "kind": "source",
+      "description": "Pumped bass: a sustained low tone (sine, 2nd and 3rd harmonics) ducked at every beat and recovering exponentially, like a sidechain compressor. (12 October 2026)",
+      "tags": [
+        "bass",
+        "sub",
+        "sidechain",
+        "pump",
+        "sustained",
+        "low"
+      ],
+      "params": [
+        "f0_hz",
+        "h2_db",
+        "h3_db",
+        "period_s",
+        "phase_s",
+        "depth_db",
+        "release_s",
+        "decay_s",
+        "amp_db",
+        "onset_s"
+      ],
+      "licence": "original"
+    },
+    {
+      "id": "reverb_fdn",
+      "family": "reverb",
+      "kind": "effect",
+      "description": "Eight-line feedback delay network with a Householder matrix, exact frequency-domain evaluation (size, T60, damping, predelay, mix all differentiable). Rooms, plates, halls. (12 October 2026)",
+      "tags": [
+        "effect",
+        "reverb",
+        "fdn",
+        "room",
+        "hall",
+        "plate"
+      ],
+      "params": [
+        "t60_s",
+        "hf_ratio",
+        "size",
+        "predelay_s",
+        "mix",
+        "out_db"
+      ],
+      "licence": "original"
+    },
+    {
+      "id": "reverb_noise_tail",
+      "family": "reverb",
+      "kind": "effect",
+      "description": "Decaying filtered noise impulse response (T60, high frequency damping ratio, predelay), FFT convolution, equal power mix. Rooms, halls, tails. (12 October 2026)",
+      "tags": [
+        "effect",
+        "reverb",
+        "tail",
+        "room",
+        "hall",
+        "space"
+      ],
+      "params": [
+        "t60_s",
+        "hf_ratio",
+        "predelay_s",
+        "mix",
+        "out_db"
+      ],
+      "licence": "original"
+    },
+    {
+      "id": "reverse_swell",
+      "family": "riser",
+      "kind": "source",
+      "description": "Reverse swell: exponential crescendo of low-passed noise and a sine, filter opening, hard cut at the end. (12 October 2026)",
+      "tags": [
+        "reverse",
+        "swell",
+        "reverse cymbal",
+        "suck",
+        "transition"
+      ],
+      "params": [
+        "duration_s",
+        "tau_s",
+        "cut_hz",
+        "open_oct",
+        "tone_hz",
+        "tone_db",
+        "amp_db",
+        "onset_s"
+      ],
+      "licence": "original"
+    },
+    {
+      "id": "riser",
+      "family": "riser",
+      "kind": "source",
+      "description": "Riser: noise band and sine sweeping up together while the level grows, cut at the end. (12 October 2026)",
+      "tags": [
+        "riser",
+        "build up",
+        "tension",
+        "sweep",
+        "transition"
+      ],
+      "params": [
+        "start_hz",
+        "end_hz",
+        "bw_oct",
+        "duration_s",
+        "curve",
+        "tone_db",
+        "amp_db",
+        "onset_s"
+      ],
+      "licence": "original"
+    },
+    {
+      "id": "room_tone",
+      "family": "ambience",
+      "kind": "source",
+      "description": "Room tone: stationary tilted noise between a high-pass and a low-pass, plus a mains hum, faded in. (12 October 2026)",
+      "tags": [
+        "ambience",
+        "room tone",
+        "air",
+        "hum",
+        "background",
+        "noise"
+      ],
+      "params": [
+        "tilt_db_oct",
+        "hp_hz",
+        "lp_hz",
+        "hum_hz",
+        "hum_db",
+        "fade_s",
+        "amp_db"
+      ],
+      "licence": "original"
+    },
+    {
+      "id": "saturation",
+      "family": "distortion",
+      "kind": "effect",
+      "description": "Biased tanh waveshaper (drive, asymmetry, mix, output). Warmth, grit, overdrive, tape-like saturation. (12 October 2026)",
+      "tags": [
+        "effect",
+        "saturation",
+        "distortion",
+        "drive",
+        "warmth"
+      ],
+      "params": [
+        "drive_db",
+        "bias",
+        "mix",
+        "out_db"
+      ],
+      "licence": "original"
+    },
+    {
+      "id": "shaker",
+      "family": "foley",
+      "kind": "source",
+      "description": "Shaker: soft high-passed noise grains in a swung pattern, alternating strong and weak strokes. (12 October 2026)",
+      "tags": [
+        "foley",
+        "shaker",
+        "percussion",
+        "pattern",
+        "noise"
+      ],
+      "params": [
+        "count",
+        "rate_hz",
+        "swing",
+        "hp_hz",
+        "attack_s",
+        "decay_s",
+        "amp_db",
+        "onset_s"
+      ],
+      "licence": "original"
+    },
+    {
+      "id": "shimmer_partials",
+      "family": "modal",
+      "kind": "source",
+      "description": "Shimmer partials: six partials doubled by detuned twins that beat, a slow tremolo, soft attack and long decay. (12 October 2026)",
+      "tags": [
+        "tonal",
+        "shimmer",
+        "sparkle",
+        "magic",
+        "pad",
+        "chorus",
+        "beating",
+        "ui"
+      ],
+      "params": [
+        "f0_hz",
+        "stretch",
+        "detune_cents",
+        "am_hz",
+        "am_depth",
+        "tilt_db_oct",
+        "attack_s",
+        "decay_s",
+        "amp_db",
+        "onset_s"
+      ],
+      "licence": "original"
+    },
+    {
+      "id": "sine_env",
+      "family": "oscillator",
+      "kind": "source",
+      "description": "Sine with an exponential pitch glide and a linear attack, exponential 60 dB decay. Blips, pops, subdrops, kicks. (12 October 2026)",
+      "tags": [
+        "tonal",
+        "sine",
+        "glide",
+        "blip",
+        "subdrop",
+        "kick"
+      ],
+      "params": [
+        "freq_hz",
+        "glide_st",
+        "glide_s",
+        "amp_db",
+        "onset_s",
+        "attack_s",
+        "decay_s"
+      ],
+      "licence": "original"
+    },
+    {
+      "id": "snare",
+      "family": "drum",
+      "kind": "source",
+      "description": "Snare drum: two decaying membrane modes plus band-passed noise wires with their own decay. (12 October 2026)",
+      "tags": [
+        "drum",
+        "snare",
+        "transient",
+        "noise",
+        "modal"
+      ],
+      "params": [
+        "body_hz",
+        "body_decay_s",
+        "noise_hz",
+        "noise_bw_oct",
+        "noise_decay_s",
+        "snappy_db",
+        "amp_db",
+        "onset_s"
+      ],
+      "licence": "original"
+    },
+    {
+      "id": "static_crackle",
+      "family": "noise",
+      "kind": "source",
+      "description": "Static crackle: deterministic sparse noise clicks (density, duration) through a band-pass. (12 October 2026)",
+      "tags": [
+        "crackle",
+        "static",
+        "vinyl",
+        "spark",
+        "electric",
+        "noise"
+      ],
+      "params": [
+        "density",
+        "duration_s",
+        "center_hz",
+        "bw_oct",
+        "click_s",
+        "amp_db",
+        "onset_s"
+      ],
+      "licence": "original"
+    },
+    {
+      "id": "stepped_glitch",
+      "family": "glitch",
+      "kind": "source",
+      "description": "Stepped glitch: sample and hold steps on a clock, each step on or off by density and held at its own pitch, a buzzy tone plus noise. (12 October 2026)",
+      "tags": [
+        "glitch",
+        "stutter",
+        "sample-hold",
+        "digital",
+        "error",
+        "data",
+        "step"
+      ],
+      "params": [
+        "step_hz",
+        "count",
+        "density",
+        "duty",
+        "edge_ms",
+        "f0_hz",
+        "pitch_spread_st",
+        "buzz",
+        "noise_db",
+        "amp_db",
+        "onset_s"
+      ],
+      "licence": "original"
+    },
+    {
+      "id": "stereo_pan",
+      "family": "stereo",
+      "kind": "effect",
+      "description": "Constant power pan. Stereo block: mono view is the left channel, render_chain_stereo renders both. Placement of a sound in the stereo field. (12 October 2026)",
+      "tags": [
+        "effect",
+        "stereo",
+        "pan",
+        "placement"
+      ],
+      "params": [
+        "pan",
+        "out_db"
+      ],
+      "licence": "original"
+    },
+    {
+      "id": "stereo_width",
+      "family": "stereo",
+      "kind": "effect",
+      "description": "Mid/side widener with a Haas-delayed side (width, Haas delay in ms). Stereo block: mono view is the left channel. Wide pads, spacious UI sounds. (12 October 2026)",
+      "tags": [
+        "effect",
+        "stereo",
+        "width",
+        "haas",
+        "mid-side"
+      ],
+      "params": [
+        "width",
+        "haas_ms",
+        "out_db"
+      ],
+      "licence": "original"
+    },
+    {
+      "id": "sub_808",
+      "family": "bass",
+      "kind": "source",
+      "description": "Sine with an exponential pitch drop from start to end frequency and tanh drive. 808 bass, kicks, sub drops, impacts. (12 October 2026)",
+      "tags": [
+        "tonal",
+        "bass",
+        "sub",
+        "808",
+        "kick",
+        "drop"
+      ],
+      "params": [
+        "start_hz",
+        "end_hz",
+        "pitch_decay_s",
+        "drive",
+        "attack_s",
+        "decay_s",
+        "amp_db",
+        "onset_s"
+      ],
+      "licence": "original"
+    },
+    {
+      "id": "sub_drop",
+      "family": "drum",
+      "kind": "source",
+      "description": "Sub drop: saturated sine gliding down to a low pitch, adjustable attack and long decay. (12 October 2026)",
+      "tags": [
+        "sub",
+        "drop",
+        "boom",
+        "low",
+        "saturation"
+      ],
+      "params": [
+        "start_hz",
+        "end_hz",
+        "glide_s",
+        "decay_s",
+        "drive",
+        "attack_s",
+        "amp_db",
+        "onset_s"
+      ],
+      "licence": "original"
+    },
+    {
+      "id": "supersaw",
+      "family": "subtractive",
+      "kind": "source",
+      "description": "Seven detuned polyBLEP saws (side voices level, detune spread) through a lowpass, attack and decay. Trance and EDM leads, risers, big chords. (12 October 2026)",
+      "tags": [
+        "tonal",
+        "saw",
+        "supersaw",
+        "lead",
+        "pad",
+        "subtractive"
+      ],
+      "params": [
+        "f0_hz",
+        "detune_cents",
+        "side_db",
+        "cutoff_hz",
+        "attack_s",
+        "decay_s",
+        "amp_db",
+        "onset_s"
+      ],
+      "licence": "original"
+    },
+    {
+      "id": "swoosh_tonal",
+      "family": "whoosh",
+      "kind": "source",
+      "description": "Tonal swoosh: a Doppler-shifted sine (high then low around the pass) with a noise band, under a bell envelope. (12 October 2026)",
+      "tags": [
+        "whoosh",
+        "swoosh",
+        "doppler",
+        "pass by",
+        "tonal",
+        "vehicle"
+      ],
+      "params": [
+        "tone_hz",
+        "doppler_st",
+        "duration_s",
+        "peak_pos",
+        "noise_hz",
+        "tone_db",
+        "amp_db",
+        "onset_s"
+      ],
+      "licence": "original"
+    },
+    {
+      "id": "thud",
+      "family": "impact",
+      "kind": "source",
+      "description": "Thud: low-passed noise hit with attack and decay plus a low sine tone. (12 October 2026)",
+      "tags": [
+        "impact",
+        "thud",
+        "dull",
+        "low",
+        "foley"
+      ],
+      "params": [
+        "cut_hz",
+        "decay_s",
+        "attack_s",
+        "tone_hz",
+        "tone_db",
+        "amp_db",
+        "onset_s"
+      ],
+      "licence": "original"
+    },
+    {
+      "id": "tom_drum",
+      "family": "drum",
+      "kind": "source",
+      "description": "Tom: four circular membrane modes with a downward pitch bend plus a stick noise. (12 October 2026)",
+      "tags": [
+        "drum",
+        "tom",
+        "membrane",
+        "modal",
+        "transient"
+      ],
+      "params": [
+        "tune_hz",
+        "decay_s",
+        "bend_st",
+        "bend_s",
+        "stick_db",
+        "amp_db",
+        "onset_s"
+      ],
+      "licence": "original"
+    },
+    {
+      "id": "tone_glide",
+      "family": "oscillator",
+      "kind": "source",
+      "description": "Sine plus second harmonic holding a note then gliding (smoothstep in log frequency) to another, with vibrato. Portamento, swipes, rising and falling UI tones. (12 October 2026)",
+      "tags": [
+        "tonal",
+        "sine",
+        "glide",
+        "portamento",
+        "vibrato",
+        "ui"
+      ],
+      "params": [
+        "start_hz",
+        "end_hz",
+        "glide_start_s",
+        "glide_s",
+        "vib_rate_hz",
+        "vib_cents",
+        "h2_db",
+        "decay_s",
+        "amp_db",
+        "onset_s"
+      ],
+      "licence": "original"
+    },
+    {
+      "id": "transient_shaper",
+      "family": "dynamics",
+      "kind": "effect",
+      "description": "Transient shaper: gain (fast envelope / slow envelope) ** amount, both time constants differentiable. Punchier or softer attacks. (12 October 2026)",
+      "tags": [
+        "effect",
+        "dynamics",
+        "transient",
+        "punch",
+        "attack"
+      ],
+      "params": [
+        "amount",
+        "fast_ms",
+        "slow_ms",
+        "out_db"
+      ],
+      "licence": "original"
+    },
+    {
+      "id": "tremolo",
+      "family": "modulation",
+      "kind": "effect",
+      "description": "Sine amplitude modulation (rate, depth, phase). Tremolo, pulsing pads, helicopter and alarm flutters. (12 October 2026)",
+      "tags": [
+        "effect",
+        "modulation",
+        "tremolo",
+        "amplitude",
+        "pulse"
+      ],
+      "params": [
+        "rate_hz",
+        "depth",
+        "phase",
+        "out_db"
+      ],
+      "licence": "original"
+    },
+    {
+      "id": "ui_blip_tri",
+      "family": "notification",
+      "kind": "source",
+      "description": "Additive triangle (odd harmonics 1/k^2) with a short pitch drop, attack and decay. UI clicks, taps, toggles, retro game blips. (12 October 2026)",
+      "tags": [
+        "tonal",
+        "triangle",
+        "blip",
+        "click",
+        "ui",
+        "retro"
+      ],
+      "params": [
+        "f0_hz",
+        "drop_st",
+        "drop_s",
+        "attack_s",
+        "decay_s",
+        "amp_db",
+        "onset_s"
+      ],
+      "licence": "original"
+    },
+    {
+      "id": "ui_click",
+      "family": "ui",
+      "kind": "source",
+      "description": "UI click: very short band-passed noise click with a sine at the band centre. (12 October 2026)",
+      "tags": [
+        "ui",
+        "click",
+        "tap",
+        "toggle",
+        "transient",
+        "short"
+      ],
+      "params": [
+        "center_hz",
+        "bw_oct",
+        "decay_s",
+        "attack_s",
+        "tone_db",
+        "amp_db",
+        "onset_s"
+      ],
+      "licence": "original"
+    },
+    {
+      "id": "ui_tick",
+      "family": "ui",
+      "kind": "source",
+      "description": "UI tick: two short sine pings separated by a gap, the second transposed and quieter. (12 October 2026)",
+      "tags": [
+        "ui",
+        "tick",
+        "tock",
+        "ping",
+        "notification",
+        "short"
+      ],
+      "params": [
+        "tone_hz",
+        "ratio2",
+        "gap_s",
+        "second_db",
+        "decay_s",
+        "amp_db",
+        "onset_s"
+      ],
+      "licence": "original"
+    },
+    {
+      "id": "whoosh",
+      "family": "whoosh",
+      "kind": "source",
+      "description": "Whoosh: noise band rising from a low to a high centre with the loudness bell, then falling back. (12 October 2026)",
+      "tags": [
+        "whoosh",
+        "swoosh",
+        "pass by",
+        "transition",
+        "noise",
+        "sweep"
+      ],
+      "params": [
+        "lo_hz",
+        "hi_hz",
+        "bw_oct",
+        "duration_s",
+        "peak_pos",
+        "amp_db",
+        "onset_s"
+      ],
+      "licence": "original"
+    },
+    {
+      "id": "wind",
+      "family": "ambience",
+      "kind": "source",
+      "description": "Wind: noise band wandering with a slow LFO that also drives gusts, faded in. (12 October 2026)",
+      "tags": [
+        "ambience",
+        "wind",
+        "air",
+        "gust",
+        "noise",
+        "outdoor"
+      ],
+      "params": [
+        "center_hz",
+        "bw_oct",
+        "sweep_oct",
+        "lfo_hz",
+        "gust_depth",
+        "attack_s",
+        "amp_db"
+      ],
+      "licence": "original"
+    },
+    {
+      "id": "wood_knock",
+      "family": "impact",
+      "kind": "source",
+      "description": "Wood knock: two decaying modes and a short click. Wood blocks, table knocks, rim clicks. (12 October 2026)",
+      "tags": [
+        "impact",
+        "wood",
+        "knock",
+        "modal",
+        "transient",
+        "foley"
+      ],
+      "params": [
+        "f1_hz",
+        "ratio",
+        "decay_s",
+        "mode2_db",
+        "click_db",
+        "amp_db",
+        "onset_s"
+      ],
+      "licence": "original"
+    }
+  ],
+  "pending": []
+}

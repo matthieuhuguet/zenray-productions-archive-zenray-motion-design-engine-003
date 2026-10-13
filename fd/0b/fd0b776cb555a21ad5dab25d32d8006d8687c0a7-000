@@ -1,0 +1,47 @@
+#!/usr/bin/env python3
+# 12 October 2026: task M2, listening comparison for Matthieu's ear (the final verdict on sound is his): alternates the
+# reference and a version, segE seconds each, for the mix and each stem. The file holds reference audio, so it is
+# written next to the reference in the private cache (never in the bench, never published).
+# Usage: ListenAB.py V_NNN [--seg 4.0]   FR : comparaison a l'ecoute, reference puis version, dans le cache prive.
+import argparse
+import sys
+from pathlib import Path
+
+import numpy as np
+
+ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(ROOT))
+from zrmd.audio import resynth as RS  # noqa: E402
+
+
+def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("version")
+    ap.add_argument("--seg", type=float, default=4.0)
+    a = ap.parse_args()
+    P = RS.params()
+    sr = P["sampleRate"]
+    ref = RS.load_reference(P)
+    d = Path(P["paths"]["bench"]) / a.version
+    out_dir = Path(P["paths"]["cache"]) / "listen"
+    out_dir.mkdir(parents=True, exist_ok=True)
+    seg = int(a.seg * sr)
+    fade = int(0.01 * sr)
+    for k in ["mix"] + RS.STEMS[:3]:
+        r = ref["mix"] if k == "mix" else ref["stems"][k]
+        o = RS._read(d / ("mix.wav" if k == "mix" else f"stems/{k}.wav"), sr)[: len(r)]
+        parts = []
+        for i in range(0, len(r) - seg, seg):  # every passage: reference, then ours at the same position
+            for x in (r[i:i + seg], o[i:i + seg]):
+                y = x.copy()
+                ramp = np.linspace(0, 1, fade)[:, None]
+                y[:fade] *= ramp
+                y[-fade:] *= ramp[::-1]
+                parts.append(y)
+        dst = out_dir / f"ab-{a.version}-{k}.wav"
+        RS.write_stereo(dst, np.concatenate(parts), sr)
+        print(dst)
+
+
+if __name__ == "__main__":
+    main()

@@ -1,0 +1,1362 @@
+{
+ "date": "12 October 2026",
+ "blocks": {
+  "filtered_noise_burst": {
+   "contractErrors": [],
+   "renderEqual": true,
+   "demoEqual": true,
+   "identityScore": 100.0,
+   "finite": true,
+   "peak": 0.7162,
+   "ok": true
+  },
+  "fm_bell": {
+   "contractErrors": [],
+   "renderEqual": true,
+   "demoEqual": true,
+   "identityScore": 100.0,
+   "finite": true,
+   "peak": 0.2498,
+   "ok": true
+  },
+  "sine_env": {
+   "contractErrors": [],
+   "renderEqual": true,
+   "demoEqual": true,
+   "identityScore": 100.0,
+   "finite": true,
+   "peak": 0.2508,
+   "ok": true
+  }
+ },
+ "cases": [
+  {
+   "target": "filtered_noise_burst",
+   "fit": "filtered_noise_burst",
+   "case": 0,
+   "expect": "recover",
+   "params": {
+    "center_start_hz": 2000.0,
+    "center_end_hz": 2000.0,
+    "bw_oct": 1.5,
+    "amp_db": -12.0,
+    "onset_s": 0.02,
+    "attack_s": 0.01,
+    "decay_s": 0.4
+   },
+   "score": 100.0,
+   "b1Score": 100.0,
+   "errors": {
+    "stft": 0.0,
+    "mel": 0.0,
+    "envelope": 0.0,
+    "onset": 0.0
+   },
+   "fitted": {
+    "center_start_hz": 2000.000244,
+    "center_end_hz": 2000.000244,
+    "bw_oct": 1.5,
+    "amp_db": -12.0,
+    "onset_s": 0.02,
+    "attack_s": 0.01,
+    "decay_s": 0.4
+   },
+   "seconds": 9.01,
+   "device": "cpu",
+   "deviceFallback": null,
+   "steps": 1,
+   "starts": 1,
+   "ok": true
+  },
+  {
+   "target": "filtered_noise_burst",
+   "fit": "fm_bell",
+   "case": 0,
+   "expect": "overlap",
+   "params": {
+    "center_start_hz": 2000.0,
+    "center_end_hz": 2000.0,
+    "bw_oct": 1.5,
+    "amp_db": -12.0,
+    "onset_s": 0.02,
+    "attack_s": 0.01,
+    "decay_s": 0.4
+   },
+   "score": 43.8678,
+   "b1Score": 65.148,
+   "errors": {
+    "stft": 6.9695,
+    "mel": 5.7159,
+    "envelope": 0.8609,
+    "onset": 0.0
+   },
+   "fitted": {
+    "carrier_hz": 115.618019,
+    "ratio": 3.360009,
+    "index": 11.991528,
+    "index_decay_s": 3.999811,
+    "amp_db": -9.827198,
+    "onset_s": 0.020908,
+    "attack_s": 0.010998,
+    "decay_s": 0.406673
+   },
+   "seconds": 132.29,
+   "device": "cpu",
+   "deviceFallback": null,
+   "steps": 250,
+   "starts": 14,
+   "ok": true
+  },
+  {
+   "target": "filtered_noise_burst",
+   "fit": "sine_env",
+   "case": 0,
+   "expect": "overlap",
+   "params": {
+    "center_start_hz": 2000.0,
+    "center_end_hz": 2000.0,
+    "bw_oct": 1.5,
+    "amp_db": -12.0,
+    "onset_s": 0.02,
+    "attack_s": 0.01,
+    "decay_s": 0.4
+   },
+   "score": 4.7079,
+   "b1Score": 4.281,
+   "errors": {
+    "stft": 11.5257,
+    "mel": 12.9011,
+    "envelope": 2.1288,
+    "onset": 0.5
+   },
+   "fitted": {
+    "freq_hz": 4620.839355,
+    "glide_st": -23.382151,
+    "glide_s": 0.006705,
+    "amp_db": -5.969128,
+    "onset_s": 0.027121,
+    "attack_s": 0.000748,
+    "decay_s": 0.371033
+   },
+   "seconds": 118.25,
+   "device": "cpu",
+   "deviceFallback": null,
+   "steps": 230,
+   "starts": 14,
+   "ok": true
+  },
+  {
+   "target": "filtered_noise_burst",
+   "fit": "filtered_noise_burst",
+   "case": 1,
+   "expect": "recover",
+   "params": {
+    "center_start_hz": 109.364716,
+    "center_end_hz": 135.879822,
+    "bw_oct": 4.95242,
+    "amp_db": -13.892712,
+    "onset_s": 0.095606,
+    "attack_s": 0.005727,
+    "decay_s": 0.439338
+   },
+   "score": 99.9501,
+   "b1Score": 99.697,
+   "errors": {
+    "stft": 0.1834,
+    "mel": 0.1196,
+    "envelope": 0.0416,
+    "onset": 0.0
+   },
+   "fitted": {
+    "center_start_hz": 110.952179,
+    "center_end_hz": 174.403595,
+    "bw_oct": 4.856846,
+    "amp_db": -13.064537,
+    "onset_s": 0.09653,
+    "attack_s": 0.003952,
+    "decay_s": 0.432181
+   },
+   "seconds": 51.86,
+   "device": "cpu",
+   "deviceFallback": null,
+   "steps": 186,
+   "starts": 4,
+   "ok": true
+  },
+  {
+   "target": "filtered_noise_burst",
+   "fit": "fm_bell",
+   "case": 1,
+   "expect": "overlap",
+   "params": {
+    "center_start_hz": 109.364716,
+    "center_end_hz": 135.879822,
+    "bw_oct": 4.95242,
+    "amp_db": -13.892712,
+    "onset_s": 0.095606,
+    "attack_s": 0.005727,
+    "decay_s": 0.439338
+   },
+   "score": 64.1434,
+   "b1Score": 2.194,
+   "errors": {
+    "stft": 5.4659,
+    "mel": 3.6379,
+    "envelope": 1.0355,
+    "onset": 0.0
+   },
+   "fitted": {
+    "carrier_hz": 182.23526,
+    "ratio": 1.34348,
+    "index": 11.919887,
+    "index_decay_s": 1.412889,
+    "amp_db": -11.910866,
+    "onset_s": 0.097056,
+    "attack_s": 0.003932,
+    "decay_s": 0.449532
+   },
+   "seconds": 134.44,
+   "device": "cpu",
+   "deviceFallback": null,
+   "steps": 500,
+   "starts": 14,
+   "ok": true
+  },
+  {
+   "target": "filtered_noise_burst",
+   "fit": "sine_env",
+   "case": 1,
+   "expect": "overlap",
+   "params": {
+    "center_start_hz": 109.364716,
+    "center_end_hz": 135.879822,
+    "bw_oct": 4.95242,
+    "amp_db": -13.892712,
+    "onset_s": 0.095606,
+    "attack_s": 0.005727,
+    "decay_s": 0.439338
+   },
+   "score": 14.444,
+   "b1Score": 0.961,
+   "errors": {
+    "stft": 9.1255,
+    "mel": 10.3912,
+    "envelope": 1.1264,
+    "onset": 0.0
+   },
+   "fitted": {
+    "freq_hz": 641.325562,
+    "glide_st": -23.232273,
+    "glide_s": 0.05011,
+    "amp_db": -10.978668,
+    "onset_s": 0.099432,
+    "attack_s": 0.000502,
+    "decay_s": 0.434866
+   },
+   "seconds": 107.13,
+   "device": "cpu",
+   "deviceFallback": null,
+   "steps": 230,
+   "starts": 14,
+   "ok": true
+  },
+  {
+   "target": "filtered_noise_burst",
+   "fit": "filtered_noise_burst",
+   "case": 2,
+   "expect": "recover",
+   "params": {
+    "center_start_hz": 6458.789551,
+    "center_end_hz": 574.85968,
+    "bw_oct": 2.300894,
+    "amp_db": -43.320541,
+    "onset_s": 0.093065,
+    "attack_s": 0.002839,
+    "decay_s": 0.123516
+   },
+   "score": 99.9504,
+   "b1Score": 99.944,
+   "errors": {
+    "stft": 0.1749,
+    "mel": 0.1257,
+    "envelope": 0.055,
+    "onset": 0.0
+   },
+   "fitted": {
+    "center_start_hz": 6361.226562,
+    "center_end_hz": 639.529907,
+    "bw_oct": 2.296461,
+    "amp_db": -43.201111,
+    "onset_s": 0.092715,
+    "attack_s": 0.003715,
+    "decay_s": 0.121528
+   },
+   "seconds": 29.76,
+   "device": "cpu",
+   "deviceFallback": null,
+   "steps": 316,
+   "starts": 2,
+   "ok": true
+  },
+  {
+   "target": "filtered_noise_burst",
+   "fit": "fm_bell",
+   "case": 2,
+   "expect": "overlap",
+   "params": {
+    "center_start_hz": 6458.789551,
+    "center_end_hz": 574.85968,
+    "bw_oct": 2.300894,
+    "amp_db": -43.320541,
+    "onset_s": 0.093065,
+    "attack_s": 0.002839,
+    "decay_s": 0.123516
+   },
+   "score": 33.4225,
+   "b1Score": 34.421,
+   "errors": {
+    "stft": 7.7182,
+    "mel": 6.995,
+    "envelope": 0.7382,
+    "onset": 0.0
+   },
+   "fitted": {
+    "carrier_hz": 341.772278,
+    "ratio": 3.703879,
+    "index": 11.916881,
+    "index_decay_s": 3.498376,
+    "amp_db": -32.775379,
+    "onset_s": 0.094054,
+    "attack_s": 0.001856,
+    "decay_s": 0.102268
+   },
+   "seconds": 127.34,
+   "device": "cpu",
+   "deviceFallback": null,
+   "steps": 250,
+   "starts": 14,
+   "ok": true
+  },
+  {
+   "target": "filtered_noise_burst",
+   "fit": "sine_env",
+   "case": 2,
+   "expect": "overlap",
+   "params": {
+    "center_start_hz": 6458.789551,
+    "center_end_hz": 574.85968,
+    "bw_oct": 2.300894,
+    "amp_db": -43.320541,
+    "onset_s": 0.093065,
+    "attack_s": 0.002839,
+    "decay_s": 0.123516
+   },
+   "score": 2.7588,
+   "b1Score": 7.088,
+   "errors": {
+    "stft": 12.8345,
+    "mel": 13.8014,
+    "envelope": 1.4151,
+    "onset": 0.1837
+   },
+   "fitted": {
+    "freq_hz": 10009.80957,
+    "glide_st": -23.990377,
+    "glide_s": 0.009383,
+    "amp_db": -32.858559,
+    "onset_s": 0.094687,
+    "attack_s": 0.001331,
+    "decay_s": 0.103067
+   },
+   "seconds": 119.45,
+   "device": "cpu",
+   "deviceFallback": null,
+   "steps": 237,
+   "starts": 14,
+   "ok": true
+  },
+  {
+   "target": "filtered_noise_burst",
+   "fit": "fm_bell",
+   "case": "red",
+   "expect": "reject",
+   "params": {
+    "center_start_hz": 2000.0,
+    "center_end_hz": 2000.0,
+    "bw_oct": 1.5,
+    "amp_db": -12.0,
+    "onset_s": 0.02,
+    "attack_s": 0.01,
+    "decay_s": 0.4
+   },
+   "score": 43.8678,
+   "b1Score": 65.148,
+   "errors": {
+    "stft": 6.9695,
+    "mel": 5.7159,
+    "envelope": 0.8609,
+    "onset": 0.0
+   },
+   "fitted": {
+    "carrier_hz": 115.618019,
+    "ratio": 3.360009,
+    "index": 11.991528,
+    "index_decay_s": 3.999811,
+    "amp_db": -9.827198,
+    "onset_s": 0.020908,
+    "attack_s": 0.010998,
+    "decay_s": 0.406673
+   },
+   "seconds": 133.28,
+   "device": "cpu",
+   "deviceFallback": null,
+   "steps": 250,
+   "starts": 14,
+   "ok": true
+  },
+  {
+   "target": "filtered_noise_burst",
+   "fit": "sine_env",
+   "case": "red",
+   "expect": "reject",
+   "params": {
+    "center_start_hz": 2000.0,
+    "center_end_hz": 2000.0,
+    "bw_oct": 1.5,
+    "amp_db": -12.0,
+    "onset_s": 0.02,
+    "attack_s": 0.01,
+    "decay_s": 0.4
+   },
+   "score": 4.7079,
+   "b1Score": 4.281,
+   "errors": {
+    "stft": 11.5257,
+    "mel": 12.9011,
+    "envelope": 2.1288,
+    "onset": 0.5
+   },
+   "fitted": {
+    "freq_hz": 4620.839355,
+    "glide_st": -23.382151,
+    "glide_s": 0.006705,
+    "amp_db": -5.969128,
+    "onset_s": 0.027121,
+    "attack_s": 0.000748,
+    "decay_s": 0.371033
+   },
+   "seconds": 117.76,
+   "device": "cpu",
+   "deviceFallback": null,
+   "steps": 230,
+   "starts": 14,
+   "ok": true
+  },
+  {
+   "target": "fm_bell",
+   "fit": "filtered_noise_burst",
+   "case": 0,
+   "expect": "overlap",
+   "params": {
+    "carrier_hz": 600.0,
+    "ratio": 1.4,
+    "index": 3.0,
+    "index_decay_s": 0.4,
+    "amp_db": -12.0,
+    "onset_s": 0.02,
+    "attack_s": 0.002,
+    "decay_s": 1.5
+   },
+   "score": 18.8255,
+   "b1Score": 0.0,
+   "errors": {
+    "stft": 7.6469,
+    "mel": 9.1806,
+    "envelope": 4.8373,
+    "onset": 0.0
+   },
+   "fitted": {
+    "center_start_hz": 77.335762,
+    "center_end_hz": 2004.846924,
+    "bw_oct": 6.036287,
+    "amp_db": -20.272655,
+    "onset_s": 0.019702,
+    "attack_s": 0.002632,
+    "decay_s": 1.674464
+   },
+   "seconds": 153.25,
+   "device": "cpu",
+   "deviceFallback": null,
+   "steps": 500,
+   "starts": 14,
+   "ok": true
+  },
+  {
+   "target": "fm_bell",
+   "fit": "fm_bell",
+   "case": 0,
+   "expect": "recover",
+   "params": {
+    "carrier_hz": 600.0,
+    "ratio": 1.4,
+    "index": 3.0,
+    "index_decay_s": 0.4,
+    "amp_db": -12.0,
+    "onset_s": 0.02,
+    "attack_s": 0.002,
+    "decay_s": 1.5
+   },
+   "score": 100.0,
+   "b1Score": 100.0,
+   "errors": {
+    "stft": 0.0,
+    "mel": 0.0,
+    "envelope": 0.0,
+    "onset": 0.0
+   },
+   "fitted": {
+    "carrier_hz": 600.000061,
+    "ratio": 1.4,
+    "index": 3.0,
+    "index_decay_s": 0.4,
+    "amp_db": -12.0,
+    "onset_s": 0.02,
+    "attack_s": 0.002,
+    "decay_s": 1.5
+   },
+   "seconds": 8.35,
+   "device": "cpu",
+   "deviceFallback": null,
+   "steps": 1,
+   "starts": 1,
+   "ok": true
+  },
+  {
+   "target": "fm_bell",
+   "fit": "sine_env",
+   "case": 0,
+   "expect": "overlap",
+   "params": {
+    "carrier_hz": 600.0,
+    "ratio": 1.4,
+    "index": 3.0,
+    "index_decay_s": 0.4,
+    "amp_db": -12.0,
+    "onset_s": 0.02,
+    "attack_s": 0.002,
+    "decay_s": 1.5
+   },
+   "score": 27.765,
+   "b1Score": 40.74,
+   "errors": {
+    "stft": 8.0225,
+    "mel": 7.8985,
+    "envelope": 0.7071,
+    "onset": -0.5
+   },
+   "fitted": {
+    "freq_hz": 608.708923,
+    "glide_st": -1.028782,
+    "glide_s": 0.821641,
+    "amp_db": -11.103794,
+    "onset_s": 0.018282,
+    "attack_s": 0.00057,
+    "decay_s": 1.464908
+   },
+   "seconds": 116.49,
+   "device": "cpu",
+   "deviceFallback": null,
+   "steps": 380,
+   "starts": 14,
+   "ok": true
+  },
+  {
+   "target": "fm_bell",
+   "fit": "filtered_noise_burst",
+   "case": 1,
+   "expect": "overlap",
+   "params": {
+    "carrier_hz": 1222.370361,
+    "ratio": 1.670498,
+    "index": 2.448198,
+    "index_decay_s": 2.153458,
+    "amp_db": -44.980049,
+    "onset_s": 0.046105,
+    "attack_s": 0.001238,
+    "decay_s": 0.294541
+   },
+   "score": 22.8868,
+   "b1Score": 0.0,
+   "errors": {
+    "stft": 8.0123,
+    "mel": 8.2149,
+    "envelope": 3.8782,
+    "onset": 0.0
+   },
+   "fitted": {
+    "center_start_hz": 1491.307129,
+    "center_end_hz": 3474.354248,
+    "bw_oct": 3.024675,
+    "amp_db": -52.312241,
+    "onset_s": 0.044941,
+    "attack_s": 0.001075,
+    "decay_s": 0.351334
+   },
+   "seconds": 157.11,
+   "device": "cpu",
+   "deviceFallback": null,
+   "steps": 250,
+   "starts": 14,
+   "ok": true
+  },
+  {
+   "target": "fm_bell",
+   "fit": "fm_bell",
+   "case": 1,
+   "expect": "recover",
+   "params": {
+    "carrier_hz": 1222.370361,
+    "ratio": 1.670498,
+    "index": 2.448198,
+    "index_decay_s": 2.153458,
+    "amp_db": -44.980049,
+    "onset_s": 0.046105,
+    "attack_s": 0.001238,
+    "decay_s": 0.294541
+   },
+   "score": 99.9598,
+   "b1Score": 99.987,
+   "errors": {
+    "stft": 0.1858,
+    "mel": 0.0639,
+    "envelope": 0.0373,
+    "onset": 0.0
+   },
+   "fitted": {
+    "carrier_hz": 1222.328369,
+    "ratio": 1.67004,
+    "index": 2.449852,
+    "index_decay_s": 2.129319,
+    "amp_db": -45.063011,
+    "onset_s": 0.046349,
+    "attack_s": 0.001211,
+    "decay_s": 0.294918
+   },
+   "seconds": 48.66,
+   "device": "cpu",
+   "deviceFallback": null,
+   "steps": 405,
+   "starts": 4,
+   "ok": true
+  },
+  {
+   "target": "fm_bell",
+   "fit": "sine_env",
+   "case": 1,
+   "expect": "overlap",
+   "params": {
+    "carrier_hz": 1222.370361,
+    "ratio": 1.670498,
+    "index": 2.448198,
+    "index_decay_s": 2.153458,
+    "amp_db": -44.980049,
+    "onset_s": 0.046105,
+    "attack_s": 0.001238,
+    "decay_s": 0.294541
+   },
+   "score": 8.301,
+   "b1Score": 0.0,
+   "errors": {
+    "stft": 11.6418,
+    "mel": 10.5846,
+    "envelope": 0.2581,
+    "onset": 0.0
+   },
+   "fitted": {
+    "freq_hz": 831.174194,
+    "glide_st": -2.297306,
+    "glide_s": 1.484541,
+    "amp_db": -45.362278,
+    "onset_s": 0.04607,
+    "attack_s": 0.001423,
+    "decay_s": 0.30138
+   },
+   "seconds": 121.37,
+   "device": "cpu",
+   "deviceFallback": null,
+   "steps": 230,
+   "starts": 14,
+   "ok": true
+  },
+  {
+   "target": "fm_bell",
+   "fit": "filtered_noise_burst",
+   "case": 2,
+   "expect": "overlap",
+   "params": {
+    "carrier_hz": 121.966652,
+    "ratio": 0.829571,
+    "index": 2.226067,
+    "index_decay_s": 0.02392,
+    "amp_db": -29.613705,
+    "onset_s": 0.034671,
+    "attack_s": 0.014098,
+    "decay_s": 0.567759
+   },
+   "score": 69.0675,
+   "b1Score": 0.0,
+   "errors": {
+    "stft": 4.2715,
+    "mel": 2.6758,
+    "envelope": 3.379,
+    "onset": -0.0001
+   },
+   "fitted": {
+    "center_start_hz": 126.445007,
+    "center_end_hz": 107.063271,
+    "bw_oct": 0.273463,
+    "amp_db": -36.582386,
+    "onset_s": 0.036225,
+    "attack_s": 0.019844,
+    "decay_s": 0.796133
+   },
+   "seconds": 151.52,
+   "device": "cpu",
+   "deviceFallback": null,
+   "steps": 250,
+   "starts": 14,
+   "ok": true
+  },
+  {
+   "target": "fm_bell",
+   "fit": "fm_bell",
+   "case": 2,
+   "expect": "recover",
+   "params": {
+    "carrier_hz": 121.966652,
+    "ratio": 0.829571,
+    "index": 2.226067,
+    "index_decay_s": 0.02392,
+    "amp_db": -29.613705,
+    "onset_s": 0.034671,
+    "attack_s": 0.014098,
+    "decay_s": 0.567759
+   },
+   "score": 99.8086,
+   "b1Score": 99.978,
+   "errors": {
+    "stft": 0.4125,
+    "mel": 0.1388,
+    "envelope": 0.0346,
+    "onset": -0.0001
+   },
+   "fitted": {
+    "carrier_hz": 121.979385,
+    "ratio": 0.895346,
+    "index": 0.135504,
+    "index_decay_s": 0.126591,
+    "amp_db": -29.561594,
+    "onset_s": 0.034709,
+    "attack_s": 0.01409,
+    "decay_s": 0.566498
+   },
+   "seconds": 119.07,
+   "device": "cpu",
+   "deviceFallback": null,
+   "steps": 380,
+   "starts": 14,
+   "ok": true
+  },
+  {
+   "target": "fm_bell",
+   "fit": "sine_env",
+   "case": 2,
+   "expect": "overlap",
+   "params": {
+    "carrier_hz": 121.966652,
+    "ratio": 0.829571,
+    "index": 2.226067,
+    "index_decay_s": 0.02392,
+    "amp_db": -29.613705,
+    "onset_s": 0.034671,
+    "attack_s": 0.014098,
+    "decay_s": 0.567759
+   },
+   "score": 99.7263,
+   "b1Score": 99.958,
+   "errors": {
+    "stft": 0.4973,
+    "mel": 0.1528,
+    "envelope": 0.0458,
+    "onset": -0.0001
+   },
+   "fitted": {
+    "freq_hz": 122.097404,
+    "glide_st": -0.094593,
+    "glide_s": 0.893434,
+    "amp_db": -29.566526,
+    "onset_s": 0.034702,
+    "attack_s": 0.014098,
+    "decay_s": 0.566634
+   },
+   "seconds": 114.3,
+   "device": "cpu",
+   "deviceFallback": null,
+   "steps": 230,
+   "starts": 14,
+   "ok": true
+  },
+  {
+   "target": "fm_bell",
+   "fit": "filtered_noise_burst",
+   "case": "red",
+   "expect": "reject",
+   "params": {
+    "carrier_hz": 600.0,
+    "ratio": 1.4,
+    "index": 5.0,
+    "index_decay_s": 1.0,
+    "amp_db": -12.0,
+    "onset_s": 0.02,
+    "attack_s": 0.002,
+    "decay_s": 1.5
+   },
+   "score": 22.0876,
+   "b1Score": 0.0,
+   "errors": {
+    "stft": 8.3576,
+    "mel": 8.5699,
+    "envelope": 2.6393,
+    "onset": 0.0
+   },
+   "fitted": {
+    "center_start_hz": 128.711441,
+    "center_end_hz": 106.172516,
+    "bw_oct": 4.619058,
+    "amp_db": -17.928093,
+    "onset_s": 0.01993,
+    "attack_s": 0.00099,
+    "decay_s": 1.538284
+   },
+   "seconds": 142.88,
+   "device": "cpu",
+   "deviceFallback": null,
+   "steps": 500,
+   "starts": 14,
+   "ok": true
+  },
+  {
+   "target": "fm_bell",
+   "fit": "sine_env",
+   "case": "red",
+   "expect": "reject",
+   "params": {
+    "carrier_hz": 600.0,
+    "ratio": 1.4,
+    "index": 5.0,
+    "index_decay_s": 1.0,
+    "amp_db": -12.0,
+    "onset_s": 0.02,
+    "attack_s": 0.002,
+    "decay_s": 1.5
+   },
+   "score": 3.5155,
+   "b1Score": 2.515,
+   "errors": {
+    "stft": 12.837,
+    "mel": 12.9251,
+    "envelope": 1.1293,
+    "onset": 0.0
+   },
+   "fitted": {
+    "freq_hz": 593.278809,
+    "glide_st": 0.131439,
+    "glide_s": 1.283434,
+    "amp_db": -10.456669,
+    "onset_s": 0.021252,
+    "attack_s": 0.007126,
+    "decay_s": 1.440523
+   },
+   "seconds": 99.12,
+   "device": "cpu",
+   "deviceFallback": null,
+   "steps": 250,
+   "starts": 14,
+   "ok": true
+  },
+  {
+   "target": "sine_env",
+   "fit": "filtered_noise_burst",
+   "case": 0,
+   "expect": "overlap",
+   "params": {
+    "freq_hz": 440.0,
+    "glide_st": 0.0,
+    "glide_s": 0.1,
+    "amp_db": -12.0,
+    "onset_s": 0.02,
+    "attack_s": 0.005,
+    "decay_s": 0.5
+   },
+   "score": 79.5055,
+   "b1Score": 58.245,
+   "errors": {
+    "stft": 3.77,
+    "mel": 2.1158,
+    "envelope": 2.0323,
+    "onset": 0.0
+   },
+   "fitted": {
+    "center_start_hz": 433.269775,
+    "center_end_hz": 443.02301,
+    "bw_oct": 0.151025,
+    "amp_db": -14.715885,
+    "onset_s": 0.020099,
+    "attack_s": 0.004625,
+    "decay_s": 0.49753
+   },
+   "seconds": 121.82,
+   "device": "cpu",
+   "deviceFallback": null,
+   "steps": 250,
+   "starts": 14,
+   "ok": true
+  },
+  {
+   "target": "sine_env",
+   "fit": "fm_bell",
+   "case": 0,
+   "expect": "overlap",
+   "params": {
+    "freq_hz": 440.0,
+    "glide_st": 0.0,
+    "glide_s": 0.1,
+    "amp_db": -12.0,
+    "onset_s": 0.02,
+    "attack_s": 0.005,
+    "decay_s": 0.5
+   },
+   "score": 99.8921,
+   "b1Score": 99.941,
+   "errors": {
+    "stft": 0.3013,
+    "mel": 0.1076,
+    "envelope": 0.0717,
+    "onset": 0.0
+   },
+   "fitted": {
+    "carrier_hz": 439.882996,
+    "ratio": 4.011549,
+    "index": 0.065553,
+    "index_decay_s": 0.010717,
+    "amp_db": -12.15744,
+    "onset_s": 0.021052,
+    "attack_s": 0.004964,
+    "decay_s": 0.500675
+   },
+   "seconds": 113.73,
+   "device": "cpu",
+   "deviceFallback": null,
+   "steps": 250,
+   "starts": 14,
+   "ok": true
+  },
+  {
+   "target": "sine_env",
+   "fit": "sine_env",
+   "case": 0,
+   "expect": "recover",
+   "params": {
+    "freq_hz": 440.0,
+    "glide_st": 0.0,
+    "glide_s": 0.1,
+    "amp_db": -12.0,
+    "onset_s": 0.02,
+    "attack_s": 0.005,
+    "decay_s": 0.5
+   },
+   "score": 100.0,
+   "b1Score": 100.0,
+   "errors": {
+    "stft": 0.0,
+    "mel": 0.0,
+    "envelope": 0.0,
+    "onset": 0.0
+   },
+   "fitted": {
+    "freq_hz": 440.000061,
+    "glide_st": 0.0,
+    "glide_s": 0.1,
+    "amp_db": -12.0,
+    "onset_s": 0.02,
+    "attack_s": 0.005,
+    "decay_s": 0.5
+   },
+   "seconds": 4.68,
+   "device": "cpu",
+   "deviceFallback": null,
+   "steps": 1,
+   "starts": 1,
+   "ok": true
+  },
+  {
+   "target": "sine_env",
+   "fit": "filtered_noise_burst",
+   "case": 1,
+   "expect": "overlap",
+   "params": {
+    "freq_hz": 545.816223,
+    "glide_st": -1.919064,
+    "glide_s": 0.817538,
+    "amp_db": -36.198349,
+    "onset_s": 0.131132,
+    "attack_s": 0.003858,
+    "decay_s": 0.322984
+   },
+   "score": 78.3182,
+   "b1Score": 16.569,
+   "errors": {
+    "stft": 3.6522,
+    "mel": 2.3191,
+    "envelope": 2.3663,
+    "onset": 0.0
+   },
+   "fitted": {
+    "center_start_hz": 515.05719,
+    "center_end_hz": 585.849609,
+    "bw_oct": 0.150495,
+    "amp_db": -37.366013,
+    "onset_s": 0.131052,
+    "attack_s": 0.004033,
+    "decay_s": 0.29596
+   },
+   "seconds": 122.18,
+   "device": "cpu",
+   "deviceFallback": null,
+   "steps": 250,
+   "starts": 14,
+   "ok": true
+  },
+  {
+   "target": "sine_env",
+   "fit": "fm_bell",
+   "case": 1,
+   "expect": "overlap",
+   "params": {
+    "freq_hz": 545.816223,
+    "glide_st": -1.919064,
+    "glide_s": 0.817538,
+    "amp_db": -36.198349,
+    "onset_s": 0.131132,
+    "attack_s": 0.003858,
+    "decay_s": 0.322984
+   },
+   "score": 99.7156,
+   "b1Score": 99.721,
+   "errors": {
+    "stft": 0.4518,
+    "mel": 0.2799,
+    "envelope": 0.0301,
+    "onset": 0.0
+   },
+   "fitted": {
+    "carrier_hz": 541.682312,
+    "ratio": 2.567928,
+    "index": 0.028272,
+    "index_decay_s": 0.018138,
+    "amp_db": -36.210407,
+    "onset_s": 0.131051,
+    "attack_s": 0.003883,
+    "decay_s": 0.323297
+   },
+   "seconds": 111.47,
+   "device": "cpu",
+   "deviceFallback": null,
+   "steps": 250,
+   "starts": 14,
+   "ok": true
+  },
+  {
+   "target": "sine_env",
+   "fit": "sine_env",
+   "case": 1,
+   "expect": "recover",
+   "params": {
+    "freq_hz": 545.816223,
+    "glide_st": -1.919064,
+    "glide_s": 0.817538,
+    "amp_db": -36.198349,
+    "onset_s": 0.131132,
+    "attack_s": 0.003858,
+    "decay_s": 0.322984
+   },
+   "score": 99.9531,
+   "b1Score": 99.965,
+   "errors": {
+    "stft": 0.1665,
+    "mel": 0.0826,
+    "envelope": 0.1102,
+    "onset": 0.0
+   },
+   "fitted": {
+    "freq_hz": 546.238525,
+    "glide_st": -0.757397,
+    "glide_s": 0.265647,
+    "amp_db": -36.383053,
+    "onset_s": 0.131592,
+    "attack_s": 0.003849,
+    "decay_s": 0.324278
+   },
+   "seconds": 79.89,
+   "device": "cpu",
+   "deviceFallback": null,
+   "steps": 90,
+   "starts": 10,
+   "ok": true
+  },
+  {
+   "target": "sine_env",
+   "fit": "filtered_noise_burst",
+   "case": 2,
+   "expect": "overlap",
+   "params": {
+    "freq_hz": 680.37561,
+    "glide_st": -16.991217,
+    "glide_s": 0.228714,
+    "amp_db": -37.501205,
+    "onset_s": 0.052741,
+    "attack_s": 0.003434,
+    "decay_s": 0.180747
+   },
+   "score": 88.1169,
+   "b1Score": 13.655,
+   "errors": {
+    "stft": 2.2013,
+    "mel": 1.9772,
+    "envelope": 1.9577,
+    "onset": 0.0
+   },
+   "fitted": {
+    "center_start_hz": 682.602905,
+    "center_end_hz": 300.135529,
+    "bw_oct": 0.150954,
+    "amp_db": -49.080097,
+    "onset_s": 0.052603,
+    "attack_s": 0.003415,
+    "decay_s": 0.225588
+   },
+   "seconds": 119.45,
+   "device": "cpu",
+   "deviceFallback": null,
+   "steps": 250,
+   "starts": 14,
+   "ok": true
+  },
+  {
+   "target": "sine_env",
+   "fit": "fm_bell",
+   "case": 2,
+   "expect": "overlap",
+   "params": {
+    "freq_hz": 680.37561,
+    "glide_st": -16.991217,
+    "glide_s": 0.228714,
+    "amp_db": -37.501205,
+    "onset_s": 0.052741,
+    "attack_s": 0.003434,
+    "decay_s": 0.180747
+   },
+   "score": 64.9479,
+   "b1Score": 45.851,
+   "errors": {
+    "stft": 4.5943,
+    "mel": 4.6261,
+    "envelope": 0.6581,
+    "onset": 0.0
+   },
+   "fitted": {
+    "carrier_hz": 590.256165,
+    "ratio": 0.877483,
+    "index": 0.18535,
+    "index_decay_s": 0.012296,
+    "amp_db": -36.917709,
+    "onset_s": 0.052828,
+    "attack_s": 0.003839,
+    "decay_s": 0.170559
+   },
+   "seconds": 104.97,
+   "device": "cpu",
+   "deviceFallback": null,
+   "steps": 250,
+   "starts": 14,
+   "ok": true
+  },
+  {
+   "target": "sine_env",
+   "fit": "sine_env",
+   "case": 2,
+   "expect": "recover",
+   "params": {
+    "freq_hz": 680.37561,
+    "glide_st": -16.991217,
+    "glide_s": 0.228714,
+    "amp_db": -37.501205,
+    "onset_s": 0.052741,
+    "attack_s": 0.003434,
+    "decay_s": 0.180747
+   },
+   "score": 99.9548,
+   "b1Score": 99.93,
+   "errors": {
+    "stft": 0.1509,
+    "mel": 0.0925,
+    "envelope": 0.1167,
+    "onset": -0.0
+   },
+   "fitted": {
+    "freq_hz": 679.31427,
+    "glide_st": -19.222775,
+    "glide_s": 0.266762,
+    "amp_db": -37.645527,
+    "onset_s": 0.052526,
+    "attack_s": 0.003441,
+    "decay_s": 0.182344
+   },
+   "seconds": 91.9,
+   "device": "cpu",
+   "deviceFallback": null,
+   "steps": 194,
+   "starts": 12,
+   "ok": true
+  },
+  {
+   "target": "sine_env",
+   "fit": "filtered_noise_burst",
+   "case": "red",
+   "expect": "reject",
+   "params": {
+    "freq_hz": 440.0,
+    "glide_st": -12.0,
+    "glide_s": 0.08,
+    "amp_db": -12.0,
+    "onset_s": 0.02,
+    "attack_s": 0.005,
+    "decay_s": 0.8
+   },
+   "score": 62.429,
+   "b1Score": 60.508,
+   "errors": {
+    "stft": 4.9542,
+    "mel": 3.4641,
+    "envelope": 3.2147,
+    "onset": 0.0
+   },
+   "fitted": {
+    "center_start_hz": 318.398193,
+    "center_end_hz": 151.195221,
+    "bw_oct": 0.207092,
+    "amp_db": -17.911888,
+    "onset_s": 0.020996,
+    "attack_s": 0.001515,
+    "decay_s": 0.915338
+   },
+   "seconds": 120.41,
+   "device": "cpu",
+   "deviceFallback": null,
+   "steps": 250,
+   "starts": 14,
+   "ok": true
+  },
+  {
+   "target": "sine_env",
+   "fit": "fm_bell",
+   "case": "red",
+   "expect": "reject",
+   "params": {
+    "freq_hz": 440.0,
+    "glide_st": -12.0,
+    "glide_s": 0.08,
+    "amp_db": -12.0,
+    "onset_s": 0.02,
+    "attack_s": 0.005,
+    "decay_s": 0.8
+   },
+   "score": 65.5263,
+   "b1Score": 62.684,
+   "errors": {
+    "stft": 5.3324,
+    "mel": 3.6689,
+    "envelope": 0.4066,
+    "onset": 0.0
+   },
+   "fitted": {
+    "carrier_hz": 228.43866,
+    "ratio": 0.999049,
+    "index": 1.720684,
+    "index_decay_s": 0.095513,
+    "amp_db": -12.696793,
+    "onset_s": 0.019908,
+    "attack_s": 0.007275,
+    "decay_s": 0.818578
+   },
+   "seconds": 94.31,
+   "device": "cpu",
+   "deviceFallback": null,
+   "steps": 436,
+   "starts": 14,
+   "ok": true
+  },
+  {
+   "target": "filtered_noise_burst",
+   "fit": "filtered_noise_burst",
+   "case": 0,
+   "expect": "recover-mps",
+   "params": {
+    "center_start_hz": 2000.0,
+    "center_end_hz": 2000.0,
+    "bw_oct": 1.5,
+    "amp_db": -12.0,
+    "onset_s": 0.02,
+    "attack_s": 0.01,
+    "decay_s": 0.4
+   },
+   "score": 100.0,
+   "b1Score": 100.0,
+   "errors": {
+    "stft": 0.0,
+    "mel": 0.0,
+    "envelope": 0.0,
+    "onset": 0.0
+   },
+   "fitted": {
+    "center_start_hz": 2000.000244,
+    "center_end_hz": 2000.000244,
+    "bw_oct": 1.5,
+    "amp_db": -12.0,
+    "onset_s": 0.02,
+    "attack_s": 0.01,
+    "decay_s": 0.4
+   },
+   "seconds": 7.5,
+   "device": "mps",
+   "deviceFallback": null,
+   "steps": 1,
+   "starts": 1,
+   "ok": true
+  }
+ ],
+ "thresholds": {
+  "recoverMin": 99.5,
+  "wrongMax": 90.0
+ },
+ "summary": {
+  "pass": true,
+  "recoverMinScore": 99.8086,
+  "rejectMaxScore": 65.5263,
+  "overlapMaxScore": 99.8921,
+  "cases": 34,
+  "failed": [],
+  "seconds": 260.2,
+  "sabotage": false
+ }
+}

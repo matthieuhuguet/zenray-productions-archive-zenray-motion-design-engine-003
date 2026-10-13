@@ -1,0 +1,86 @@
+{
+  "id": "thud",
+  "family": "impact",
+  "description": "Thud: low-passed noise hit with attack and decay plus a low sine tone. (12 October 2026)",
+  "tags": [
+    "impact",
+    "thud",
+    "dull",
+    "low",
+    "foley"
+  ],
+  "sources": [
+    {
+      "what": "filtered noise and a sine",
+      "url": null,
+      "licence": "original (derived from the mathematics, no code copied)"
+    }
+  ],
+  "licence": "original",
+  "params": [
+    {
+      "name": "cut_hz",
+      "unit": "Hz",
+      "min": 60.0,
+      "max": 1500.0,
+      "default": 300.0,
+      "scale": "log",
+      "description": "low-pass cutoff of the noise"
+    },
+    {
+      "name": "decay_s",
+      "unit": "s (T60)",
+      "min": 0.03,
+      "max": 0.8,
+      "default": 0.2,
+      "scale": "log",
+      "description": "time to fall 60 dB"
+    },
+    {
+      "name": "attack_s",
+      "unit": "s",
+      "min": 0.0005,
+      "max": 0.03,
+      "default": 0.002,
+      "scale": "log",
+      "description": "linear attack"
+    },
+    {
+      "name": "tone_hz",
+      "unit": "Hz",
+      "min": 30.0,
+      "max": 200.0,
+      "default": 70.0,
+      "scale": "log",
+      "description": "pitch of the sine"
+    },
+    {
+      "name": "tone_db",
+      "unit": "dB re noise",
+      "min": -30.0,
+      "max": 6.0,
+      "default": -6.0,
+      "scale": "lin",
+      "description": "sine level"
+    },
+    {
+      "name": "amp_db",
+      "unit": "dBFS",
+      "min": -60.0,
+      "max": 0.0,
+      "default": -12.0,
+      "scale": "lin",
+      "description": "peak level of the main layer"
+    },
+    {
+      "name": "onset_s",
+      "unit": "s",
+      "min": 0.0,
+      "max": 0.2,
+      "default": 0.02,
+      "scale": "lin",
+      "description": "start time in the window"
+    }
+  ],
+  "date": "12 October 2026"
+}

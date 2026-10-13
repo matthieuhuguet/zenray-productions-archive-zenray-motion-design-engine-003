@@ -1,0 +1,35 @@
+# 12 October 2026: swoosh_tonal, a pass-by with a Doppler shift: a sine high by doppler_st / 2 semitones while
+# approaching, low by as much after the pass (smooth switch at the peak), with a band of noise, under one bell.
+# Derived from the mathematics. FR : passage avec effet Doppler, sinus et bruit.
+import math
+
+import torch
+
+from zrmd.audio import sfxdsp as D
+from zrmd.audio.bank import Block, db_to_amp
+
+PASS_S, NOISE_BW_OCT = 0.03, 2.0
+META = D.meta("whoosh", "Tonal swoosh: a Doppler-shifted sine (high then low around the pass) with a noise band, under a bell envelope.", ["whoosh", "swoosh", "doppler", "pass by", "tonal", "vehicle"], "Doppler pitch curve, sine and filtered noise")
+
+
+class SwooshTonal(Block):
+    ID = "swoosh_tonal"
+    PARAMS = [
+        D.param("tone_hz", "Hz", 150, 4000, 600, "log", "pitch at the pass"),
+        D.param("doppler_st", "semitones", 0.0, 14.0, 5.0, "lin", "pitch drop across the pass"),
+        D.param("duration_s", "s", 0.1, 0.85, 0.6, "log", "total length"),
+        D.param("peak_pos", "x duration", 0.15, 0.85, 0.5, "lin", "position of the pass"),
+        D.param("noise_hz", "Hz", 200, 10000, 2000, "log", "noise band centre"),
+        D.param("tone_db", "dB re noise", -30, 6, -3, "lin", "sine level"),
+        D.AMP(-14.0), D.ONSET(0.12, 0.02),
+    ]
+
+    def synth(self, v, t, sr):
+        o, d, p = v["onset_s"], v["duration_s"], v["peak_pos"]
+        f = v["tone_hz"] * torch.pow(2.0, v["doppler_st"] / 12.0 * (0.5 - torch.sigmoid((t - o - p * d) / PASS_S)))
+        tone = math.sqrt(2.0) * D.sweep_tone(t, o, f, sr)
+        n = D.filtered(self.noise(t.shape[0], t.device), lambda fr: D.band(fr, v["noise_hz"], NOISE_BW_OCT), sr)
+        return db_to_amp(v["amp_db"]) * D.bell(t, o, d, p, 2.0) * (n + db_to_amp(v["tone_db"]) * tone)
+
+
+BLOCK = SwooshTonal

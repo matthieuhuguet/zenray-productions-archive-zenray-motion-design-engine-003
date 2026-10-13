@@ -1,0 +1,39 @@
+# 12 October 2026: sub_808, a sine whose pitch falls exponentially from start_hz to end_hz (time constant
+# pitch_decay_s), through a tanh saturator of adjustable drive, with attack and long decay. 808 kicks, sub drops.
+# FR : sinus à chute de hauteur exponentielle et saturation, basse 808.
+import math
+
+import torch
+
+from zrmd.audio.bank import Block, db_to_amp, envelope, stft_filter
+from zrmd.audio import fxdsp as F
+from zrmd.audio.fxdsp import param as P
+
+META = {"family": "bass", "kind": "source",
+        "description": "Sine with an exponential pitch drop from start to end frequency and tanh drive. 808 bass, kicks, sub drops, impacts. (12 October 2026)",
+        "tags": ["tonal", "bass", "sub", "808", "kick", "drop"],
+        "sources": [{"what": "pitch-swept sine with waveshaping", "url": None, "licence": F.SOURCE}],
+        "licence": "original"}
+
+
+class Sub808(Block):
+    ID = "sub_808"
+    PARAMS = [
+        P("start_hz", "Hz", 40, 400, 160, "log", "pitch at the onset"),
+        P("end_hz", "Hz", 25, 120, 50, "log", "pitch reached"),
+        P("pitch_decay_s", "s", 0.005, 0.5, 0.06, "log", "pitch fall time constant"),
+        P("drive", "x", 1.0, 10.0, 2.0, "log", "tanh drive"),
+        P("attack_s", "s", 0.0005, 0.05, 0.002, "log", "linear attack"),
+        P("decay_s", "s (T60)", 0.1, 4.0, 1.2, "log", "time to fall 60 dB"),
+        P("amp_db", "dBFS", -60, 0, -9, "lin", "peak level"),
+        P("onset_s", "s", 0.0, 0.25, 0.02, "lin", "start time in the window"),
+    ]
+
+    def synth(self, v, t, sr):
+        u = torch.clamp(t - v["onset_s"], min=0.0)
+        f = v["end_hz"] + (v["start_hz"] - v["end_hz"]) * torch.exp(-u / v["pitch_decay_s"])
+        s = torch.sin(F.TWO_PI * F.frac(F.cycles(f * (t >= v["onset_s"]).float(), sr)))
+        return F.amp(v) * F.env_of(t, v) * torch.tanh(v["drive"] * s) / torch.tanh(v["drive"])
+
+
+BLOCK = Sub808

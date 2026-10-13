@@ -1,0 +1,110 @@
+# 12 October 2026: build the graphic bible and the storyboard of one reference (B2).
+# Writes /Users/zenray/.claude/tmp/tmp-zenray-motion-design/references/<slug>/bible.json, bible.md, storyboard.html
+# (thumbnails go to the local reference cache only). Optional font match on the largest measured text line: the line is
+# read by tesseract in memory to drive the glyph comparator, and the text is never written anywhere.
+# Run from a folder outside the downloaded media, isolated:
+#   OMP_NUM_THREADS=1 /Users/zenray/.venvs/zenray-motion/bin/python -I Scripts/BuildReferenceBook.py --slug onekey-pro-2
+#   ... --slug X --render-only            (re-render bible.md and storyboard.html after editing descriptions.json)
+#   ... --slug X --sheets <dir>           (review contact sheets for the eye, outside the workshop)
+#   ... --index                           (references/INDEX.md over every bible)
+# FR : construit la bible graphique et le storyboard d'une reference ; options de rendu seul, planches et index.
+from __future__ import annotations
+
+import argparse
+import json
+import re
+import subprocess
+import sys
+import time
+from pathlib import Path
+
+from zrmd import bible as B
+from zrmd import settings, storyboard
+
+
+def font_match(slug: str, b: dict) -> dict:
+    """Best free font for the largest text line of a text card or graphic shot. The OCR text lives in memory only."""
+    from zrmd.analyze import fontmatch
+    import cv2
+    candidates = []
+    for s in b["shots"]:
+        if s["content"] not in ("textcard", "graphic"):  # eye-reviewed class: never a photo or a screen capture
+            continue
+        for line in s["text_lines"][:1]:
+            if line.get("_crop_file") and Path(line["_crop_file"]).exists():
+                score = line["x_height_px1080"] * (2.0 if s["content"] == "textcard" else 1.0)
+                candidates.append((score, s["id"], line))
+    if not candidates:
+        return {"error": "aucune ligne de texte mesurée dans un plan carte texte ou graphique"}
+    for _, sid, line in sorted(candidates, key=lambda c: -c[0])[:6]:
+        r = subprocess.run(["tesseract", line["_crop_file"], "-", "--psm", "7"], capture_output=True, text=True)
+        text = re.sub(r"[^A-Za-z0-9 ]", "", r.stdout).strip()
+        if len(text.replace(" ", "")) < 4:
+            continue
+        image = cv2.imread(line["_crop_file"], cv2.IMREAD_GRAYSCALE)
+        if not line["light_on_dark"]:
+            image = 255 - image  # the comparator expects light ink on a dark ground
+        t0 = time.time()
+        ranked = fontmatch.match_font(image, text, top=5)
+        return {"shot": sid, "x_height_px1080": line["x_height_px1080"], "characters": len(text),
+                "seconds": round(time.time() - t0, 1),
+                "ranking": [{k: r[k] for k in ("family", "style", "weight", "tracking_em", "score")} for r in ranked]}
+    return {"error": "lecture des caractères insuffisante sur les lignes candidates"}
+
+
+def index() -> Path:
+    rows = []
+    for p in sorted(B.REFERENCES.glob("*/bible.json")):
+        b = json.loads(p.read_text(encoding="utf-8"))
+        R, fam = b["summary"]["rhythm"], b["summary"]["families_time_share"]
+        snd = b.get("sound") or {}
+        dom = ", ".join(f"{B.FAMILY_FR[k]} {B.fr_num(100 * v, 0)} %" for k, v in list(fam.items())[:2])
+        tempo = f"{B.fr_num(snd.get('tempo_bpm'), 1)} BPM" if snd else "sans son"
+        rows.append(f"| {b['slug']} | {B.fr_num(R['duration'], 1)} s | {R['shots']} | {dom} | {tempo} | "
+                    f"[bible]({b['slug']}/bible.md) | [storyboard]({b['slug']}/storyboard.html) |")
+    text = "\n".join([
+        f"# Index des références mesurées ({B.DATE})", "",
+        f"Bibles graphiques et storyboards produits par `Scripts/BuildReferenceBook.py` le {B.DATE}. Les vignettes des "
+        f"storyboards sont lues depuis le cache local `/Users/zenray/.claude/tmp/tmp-zenray-motion-design-refcache/`, jamais "
+        f"copiées ici. La famille « montage » regroupe les plans de moins d'une demi-seconde. ({B.DATE})", "",
+        "| Référence | Durée | Plans | Familles dominantes (part du temps) | Tempo | Bible | Storyboard |",
+        "|---|---|---|---|---|---|---|", *rows, ""])
+    target = B.REFERENCES / "INDEX.md"
+    target.write_text(text, encoding="utf-8")
+    return target
+
+
+def main() -> None:
+    ap = argparse.ArgumentParser(description="Graphic bible and storyboard of one reference.")
+    ap.add_argument("--slug")
+    ap.add_argument("--workers", type=int, default=8)
+    ap.add_argument("--render-only", action="store_true")
+    ap.add_argument("--force-shots", action="store_true")
+    ap.add_argument("--fontmatch", action="store_true")
+    ap.add_argument("--no-sound", action="store_true")
+    ap.add_argument("--sheets")
+    ap.add_argument("--index", action="store_true")
+    a = ap.parse_args()
+    out = {"date": B.DATE}
+    if a.slug and not a.render_only and not a.fontmatch and not a.sheets:
+        t0 = time.time()
+        b = B.build(a.slug, workers=a.workers, force_shots=a.force_shots, with_sound=not a.no_sound)
+        out.update({"slug": a.slug, "shots": len(b["shots"]), "seconds": round(time.time() - t0, 1)})
+    if a.slug and a.fontmatch:
+        p = B.REFERENCES / a.slug / "bible.json"
+        b = json.loads(p.read_text(encoding="utf-8"))
+        b["font_match"] = font_match(a.slug, b)
+        p.write_text(json.dumps(b, indent=1, ensure_ascii=False, default=float) + "\n", encoding="utf-8")
+        out["font_match"] = b["font_match"]
+    if a.slug and a.sheets:
+        out["sheets"] = [str(p) for p in storyboard.review_sheets(a.slug, a.sheets)]
+    if a.slug and not a.sheets:
+        out["bible_md"] = str(B.write_markdown(a.slug))
+        out["storyboard"] = str(storyboard.write(a.slug))
+    if a.index:
+        out["index"] = str(index())
+    print(json.dumps(out, ensure_ascii=False, default=float))
+
+
+if __name__ == "__main__":
+    sys.exit(main())

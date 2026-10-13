@@ -1,0 +1,87 @@
+{
+  "id": "wind",
+  "family": "ambience",
+  "description": "Wind: noise band wandering with a slow LFO that also drives gusts, faded in. (12 October 2026)",
+  "tags": [
+    "ambience",
+    "wind",
+    "air",
+    "gust",
+    "noise",
+    "outdoor"
+  ],
+  "sources": [
+    {
+      "what": "moving filtered noise and LFO amplitude",
+      "url": null,
+      "licence": "original (derived from the mathematics, no code copied)"
+    }
+  ],
+  "licence": "original",
+  "params": [
+    {
+      "name": "center_hz",
+      "unit": "Hz",
+      "min": 100.0,
+      "max": 6000.0,
+      "default": 800.0,
+      "scale": "log",
+      "description": "mean band centre"
+    },
+    {
+      "name": "bw_oct",
+      "unit": "octaves",
+      "min": 0.5,
+      "max": 5.0,
+      "default": 1.5,
+      "scale": "log",
+      "description": "band width"
+    },
+    {
+      "name": "sweep_oct",
+      "unit": "octaves",
+      "min": 0.0,
+      "max": 2.0,
+      "default": 0.8,
+      "scale": "lin",
+      "description": "how far the centre wanders"
+    },
+    {
+      "name": "lfo_hz",
+      "unit": "Hz",
+      "min": 0.3,
+      "max": 6.0,
+      "default": 1.5,
+      "scale": "log",
+      "description": "LFO rate"
+    },
+    {
+      "name": "gust_depth",
+      "unit": "0..1",
+      "min": 0.0,
+      "max": 1.0,
+      "default": 0.5,
+      "scale": "lin",
+      "description": "level modulation by the LFO"
+    },
+    {
+      "name": "attack_s",
+      "unit": "s",
+      "min": 0.005,
+      "max": 0.4,
+      "default": 0.1,
+      "scale": "log",
+      "description": "fade-in length"
+    },
+    {
+      "name": "amp_db",
+      "unit": "dBFS",
+      "min": -60.0,
+      "max": 0.0,
+      "default": -18.0,
+      "scale": "lin",
+      "description": "peak level of the main layer"
+    }
+  ],
+  "date": "12 October 2026"
+}

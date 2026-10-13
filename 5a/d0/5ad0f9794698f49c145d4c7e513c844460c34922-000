@@ -1,0 +1,39 @@
+# 12 October 2026: paper_rustle, band-passed noise under an attack and decay, amplitude-modulated by a crinkle signal:
+# a fixed sum of 8 sines (R1 pattern of rates around crinkle_hz and of phases) pushed through a sigmoid so that it
+# crackles. Derived from the mathematics. FR : froissement de papier.
+import math
+
+import torch
+
+from zrmd.audio import sfxdsp as D
+from zrmd.audio.bank import Block, db_to_amp
+
+K, SALT_R, SALT_P, SHARP, BIAS = 8, 0.17, 0.53, 6.0, 2.0
+META = D.meta("foley", "Paper rustle: band-passed noise with attack and decay, modulated by a crinkle signal (fixed sum of sines through a sigmoid).", ["foley", "paper", "rustle", "crinkle", "noise"], "deterministic amplitude modulation of filtered noise")
+
+
+class PaperRustle(Block):
+    ID = "paper_rustle"
+    # 12 October 2026 (A1): coupled parameters scanned jointly by dfit (see dfit scanPairs).
+    FIT = {"scanPoints": 129, "scanPairs": [["crinkle_hz", "depth"]]}
+    PARAMS = [
+        D.param("center_hz", "Hz", 800, 12000, 4000, "log", "band centre"),
+        D.param("bw_oct", "octaves", 0.5, 5.0, 2.5, "log", "band width"),
+        D.param("crinkle_hz", "Hz", 3, 60, 15, "log", "mean crinkle rate"),
+        D.param("depth", "0..1", 0.0, 1.0, 0.7, "lin", "crinkle modulation depth"),
+        D.param("duration_s", "s (T60)", 0.1, 3.0, 0.8, "log", "time to fall 60 dB"),
+        D.param("attack_s", "s", 0.002, 0.2, 0.03, "log", "linear attack"),
+        D.AMP(-14.0), D.ONSET(),
+    ]
+
+    def synth(self, v, t, sr):
+        o, dev = v["onset_s"], t.device
+        r = 0.5 + 1.5 * D.pattern(K, SALT_R, dev)
+        ph = 2.0 * math.pi * D.pattern(K, SALT_P, dev)
+        s = torch.sin(2.0 * math.pi * v["crinkle_hz"] * r[:, None] * t[None, :] + ph[:, None]).sum(0) / math.sqrt(K / 2.0)
+        am = 1.0 - v["depth"] + v["depth"] * torch.sigmoid(SHARP * s - BIAS)
+        n = D.filtered(self.noise(t.shape[0], dev), lambda fr: D.band(fr, v["center_hz"], v["bw_oct"]), sr)
+        return db_to_amp(v["amp_db"]) * D.decay(t, o, v["duration_s"], v["attack_s"]) * am * n
+
+
+BLOCK = PaperRustle

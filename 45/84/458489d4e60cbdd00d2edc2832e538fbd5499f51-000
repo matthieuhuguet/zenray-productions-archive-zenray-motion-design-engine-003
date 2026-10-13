@@ -1,0 +1,33 @@
+# 12 October 2026: peak_eq, one RBJ peaking equaliser band (boost or cut around freq_hz, width q), static, applied as
+# its magnitude on the STFT grid. Effect block (fixed exciter alone, bus in a chain). FR : correcteur en cloche.
+import math
+
+import torch
+
+from zrmd.audio.bank import db_to_amp, stft_filter
+from zrmd.audio import fxdsp as F
+from zrmd.audio.fxdsp import EffectBlock
+from zrmd.audio.fxdsp import param as P
+
+META = {"family": "filter", "kind": "effect",
+        "description": "One peaking equaliser band, boost or cut, frequency and Q. Tone shaping, presence, honk, scoop. (12 October 2026)",
+        "tags": ["effect", "eq", "peaking", "tone"],
+        "sources": [F.RBJ],
+        "licence": "original"}
+
+
+class PeakEq(EffectBlock):
+    ID = "peak_eq"
+    PARAMS = [
+        P("freq_hz", "Hz", 40, 16000, 1500, "log", "band centre"),
+        P("gain_db", "dB", -18, 18, 9, "lin", "boost (positive) or cut"),
+        P("q", "Q", 0.3, 10.0, 1.5, "log", "band sharpness"),
+        P("out_db", "dB", -24, 12, 0, "lin", "output gain"),
+    ]
+
+    def fx(self, v, x, t, sr):
+        mask = lambda fr, tm: F.biquad_mag("peak", fr, v["freq_hz"], v["q"], v["gain_db"], sr=sr)
+        return db_to_amp(v["out_db"]) * stft_filter(x, mask, 1024, 256, sr)
+
+
+BLOCK = PeakEq

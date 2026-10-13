@@ -1,0 +1,35 @@
+# 12 October 2026: whoosh, noise through a Gaussian band whose centre rises from lo_hz to hi_hz with the loudness and
+# falls back with it (one bell over duration, peak at peak_pos): an object passing by. Derived from the mathematics.
+# FR : whoosh, bande de bruit qui monte et redescend avec le volume.
+import torch
+
+from zrmd.audio import sfxdsp as D
+from zrmd.audio.bank import Block, db_to_amp
+
+LEVEL_POWER = 2.0
+META = D.meta("whoosh", "Whoosh: noise band rising from a low to a high centre with the loudness bell, then falling back.", ["whoosh", "swoosh", "pass by", "transition", "noise", "sweep"], "moving filtered noise under a bell envelope")
+
+
+class Whoosh(Block):
+    ID = "whoosh"
+    PARAMS = [
+        D.param("lo_hz", "Hz", 80, 4000, 400, "log", "band centre at the edges"),
+        D.param("hi_hz", "Hz", 400, 16000, 3000, "log", "band centre at the peak"),
+        D.param("bw_oct", "octaves", 0.3, 5.0, 1.5, "log", "band width"),
+        D.param("duration_s", "s", 0.1, 0.85, 0.5, "log", "total length"),
+        D.param("peak_pos", "x duration", 0.15, 0.85, 0.6, "lin", "position of the loudest instant"),
+        D.AMP(-20.0), D.ONSET(0.12, 0.02),
+    ]
+
+    def synth(self, v, t, sr):
+        o, d, p = v["onset_s"], v["duration_s"], v["peak_pos"]
+        a, b, sig = torch.log2(v["lo_hz"]), torch.log2(v["hi_hz"]), v["bw_oct"] / D.FWHM
+
+        def mask(freqs, times):
+            c = a + (b - a) * D.bell(times, o, d, p, 1.0)
+            return torch.exp(-0.5 * ((D.log2f(freqs) - c) / sig) ** 2)
+
+        return db_to_amp(v["amp_db"]) * D.bell(t, o, d, p, LEVEL_POWER) * D.moving(self.noise(t.shape[0], t.device), mask, sr)
+
+
+BLOCK = Whoosh

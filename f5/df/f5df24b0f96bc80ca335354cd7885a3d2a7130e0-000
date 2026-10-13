@@ -1,0 +1,43 @@
+# 12 October 2026: keyboard_typing, a parametric pattern of key strokes, not random: up to 16 strokes at rate_hz, the
+# count is continuous (sfxdsp.soft_count), each stroke shifted by jitter times a fixed R1 pattern and attenuated by
+# accent_db times another fixed pattern. Each stroke is a band-passed noise click. Derived from the mathematics.
+# FR : frappe au clavier, motif déterministe (nombre, cadence, jitter en paramètres).
+import torch
+
+from zrmd.audio import sfxdsp as D
+from zrmd.audio.bank import Block, db_to_amp
+
+K, SALT_T, SALT_A, CLICK_BW_OCT, ATTACK_S = 16, 0.23, 0.71, 1.5, 0.0003
+TEMPLATE_N = 6000  # 12 October 2026 (A1): 125 ms stroke template at 48 kHz, longer than the 0.1 s longest T60
+META = D.meta("foley", "Keyboard typing: a deterministic pattern of key clicks with count, rate, jitter and accent as parameters.", ["foley", "keyboard", "typing", "pattern", "clicks"], "deterministic stroke pattern (R1 sequence) of filtered noise clicks")
+
+
+class KeyboardTyping(Block):
+    ID = "keyboard_typing"
+    # 12 October 2026 (A1): stroke pattern, so the fitter guides with a time blur first (see ploss.time_blur_error).
+    FIT = {"screenBlurMs": 25.0, "blurStartMs": 30.0, "blurEndMs": 2.0, "screenSamples": 768,
+           "scanGroups": [["onset_s", "rate_hz", "jitter"], "*"],
+           "scanPairs": [["rate_hz", "onset_s"], ["jitter", "accent_db"]]}
+    PARAMS = [
+        D.param("count", "strokes", 1, 16, 6, "lin", "number of strokes (continuous)"),
+        D.param("rate_hz", "strokes/s", 3, 16, 8, "log", "mean stroke rate"),
+        D.param("jitter", "x period", 0.0, 0.6, 0.25, "lin", "timing deviation from the grid, as a fraction of the period"),
+        D.param("accent_db", "dB", 0.0, 12.0, 4.0, "lin", "level variation between strokes"),
+        D.param("click_hz", "Hz", 1000, 9000, 3000, "log", "click band centre"),
+        D.param("decay_s", "s (T60)", 0.008, 0.1, 0.03, "log", "decay of each stroke"),
+        D.AMP(-14.0), D.ONSET(),
+    ]
+
+    def synth(self, v, t, sr):
+        dev = t.device
+        times = D.hit_times(v["onset_s"], v["rate_hz"], K, v["jitter"], SALT_T, dev)
+        w = D.soft_count(v["count"], K, dev) * db_to_amp(-v["accent_db"] * D.pattern(K, SALT_A, dev))
+        # 12 October 2026 (A1): each stroke carries its own noise excerpt and is placed by an exact delay
+        # (sfxdsp.delay_sum), so stroke times have smooth, wide basins. FR : chaque frappe porte son bruit.
+        u = D.template_time(t, TEMPLATE_N, sr)  # 13 October 2026: window-independent axis
+        tpl = D.stroke_noise(self, K, TEMPLATE_N, dev) * D.decay(u, 0.0, v["decay_s"], ATTACK_S)[None, :]
+        y = D.delay_sum(tpl, times, w, t.shape[0], sr)
+        return db_to_amp(v["amp_db"]) * D.filtered(y, lambda fr: D.band(fr, v["click_hz"], CLICK_BW_OCT), sr)
+
+
+BLOCK = KeyboardTyping

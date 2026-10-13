@@ -1,0 +1,97 @@
+{
+  "id": "fm_epiano",
+  "family": "fm",
+  "kind": "source",
+  "description": "Ratio 1:1 FM tone with a decaying index plus a short 14x tine partial. Electric piano, soft keys, warm notification notes. (12 October 2026)",
+  "tags": [
+    "tonal",
+    "fm",
+    "epiano",
+    "keys",
+    "tine"
+  ],
+  "sources": [
+    {
+      "what": "FM synthesis equations",
+      "url": null,
+      "reference": "J. Chowning, JAES 21(7), 1973",
+      "licence": "original (derived from the published mathematics, no code copied)"
+    }
+  ],
+  "licence": "original",
+  "params": [
+    {
+      "name": "f0_hz",
+      "unit": "Hz",
+      "min": 50.0,
+      "max": 2000.0,
+      "default": 330.0,
+      "scale": "log",
+      "description": "fundamental"
+    },
+    {
+      "name": "index",
+      "unit": "rad",
+      "min": 0.0,
+      "max": 6.0,
+      "default": 1.8,
+      "scale": "lin",
+      "description": "peak modulation index"
+    },
+    {
+      "name": "index_decay_s",
+      "unit": "s (T60)",
+      "min": 0.02,
+      "max": 3.0,
+      "default": 0.6,
+      "scale": "log",
+      "description": "decay of the index"
+    },
+    {
+      "name": "tine_db",
+      "unit": "dB",
+      "min": -40.0,
+      "max": 0.0,
+      "default": -14.0,
+      "scale": "lin",
+      "description": "level of the 14x tine partial"
+    },
+    {
+      "name": "tine_decay_s",
+      "unit": "s (T60)",
+      "min": 0.01,
+      "max": 1.0,
+      "default": 0.12,
+      "scale": "log",
+      "description": "decay of the tine"
+    },
+    {
+      "name": "decay_s",
+      "unit": "s (T60)",
+      "min": 0.1,
+      "max": 6.0,
+      "default": 1.8,
+      "scale": "log",
+      "description": "decay of the tone"
+    },
+    {
+      "name": "amp_db",
+      "unit": "dBFS",
+      "min": -60.0,
+      "max": 0.0,
+      "default": -12.0,
+      "scale": "lin",
+      "description": "peak level"
+    },
+    {
+      "name": "onset_s",
+      "unit": "s",
+      "min": 0.0,
+      "max": 0.25,
+      "default": 0.02,
+      "scale": "lin",
+      "description": "start time in the window"
+    }
+  ],
+  "date": "12 October 2026"
+}

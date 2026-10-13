@@ -1,0 +1,179 @@
+# 12 October 2026, 11:40 CEST: closed loop for one caption shot. Each pass is a new version V_NNN:
+# measure -> params -> cook -> render -> verify -> correct (position, scale curve, brightness curve), until the
+# weakest dimension reaches the target or a pass stops paying. Run: python -I Scripts/ReproduceTextCard.py \
+#   --video <ref.mp4> --start 4.933 --end 6.283 --motion <workshop>/motions/<id> --words "Quietly brilliant"
+from __future__ import annotations
+
+import argparse
+import json
+import sys
+from pathlib import Path
+
+import numpy as np
+
+from zrmd import settings, versions
+from zrmd.analyze import layers
+from zrmd.emit import hyperframes as hf
+from zrmd.render import render, lint
+from zrmd.reproduce import textcard
+from zrmd.verify import fidelity
+
+
+def measure_render(out_mp4: str, frames: int, fps: float) -> dict:
+    cfg = settings.get("analysis.layers"); cfg["group"] = True
+    shot = layers.analyze_shot(out_mp4, 0.0, frames / fps, cfg)
+    return max(shot["elements"], key=lambda e: e["peak_ink"]) if shot["elements"] else None
+
+
+def correct(params: dict, ref: dict, out_track: dict, start: float) -> dict:
+    """Shift the caption by the mean centre error; rescale curves by the measured ratio (closed loop)."""
+    scale = 1920 / 960
+    cap = next(l for l in params["layers"] if l["id"] == "caption")
+    rt = np.array(ref["track"]["t"]) - start
+    ot = np.array([f["t"] for f in out_track["frames"]])
+    rcx, rcy = np.array(ref["track"].get("bx", ref["track"]["cx"])), np.array(ref["track"]["cy"])
+    ocx = np.interp(rt, ot, [(f["box"][0] + f["box"][2] / 2.0) * scale for f in out_track["frames"]])
+    ocy = np.interp(rt, ot, [f["cy"] * scale for f in out_track["frames"]])
+    tail = slice(len(rt) // 2, None)
+    # Same quantity as the verifier's settle point: box centre on the most lit frames of each video.
+    r_lit = np.argsort(-np.array(ref["track"].get("mass", [1] * len(rcx))))[:5]
+    o_frames = sorted(out_track["frames"], key=lambda f: -f.get("mass", f["ink"]))[:5]
+    o_bx = float(np.mean([(f["box"][0] + f["box"][2] / 2.0) * scale for f in o_frames]))
+    cap["x"] = round(cap["x"] + float(np.mean(rcx[r_lit])) - o_bx, 2)
+    cap["y"] = round(cap["y"] + float(np.median(rcy[tail] - ocy[tail])), 2)
+    rsy = np.array(ref["track"]["sy"]); osy = np.interp(rt, ot, [f["sy"] for f in out_track["frames"]])
+    # Size is corrected only from the x-height (typography dimension, content-independent); the ink moments
+    # (sy) depend on the words, so they drive the scale curve shape, never the font size.
+    typo = ref.get("_typo") or {}
+    if typo.get("x_height") and typo["x_height"][1]:
+        xa, xb = typo["x_height"]
+        if abs(xa / xb - 1) > 0.015:
+            cap["font"]["size"] = round(cap["font"]["size"] * xa / xb, 3)
+    rb = np.array(ref["track"]["bright"]); ob = np.interp(rt, ot, [sum(f["color"]) / 3 for f in out_track["frames"]])
+    bratio = float(np.median(rb[tail] / np.maximum(ob[tail], 1e-6)))
+    if not cap.get("shine"):
+        for tw in cap["tracks"].get("brightness", []):
+            tw["from"] = round(tw["from"] * bratio, 4); tw["to"] = round(tw["to"] * bratio, 4)
+    if cap.get("lightmap"):
+        # The light map carries all the light: no extra brightness filter on the layer.
+        cap.setdefault("initial", {})["brightness"] = 1.0
+    else:
+        cap.setdefault("initial", {})["brightness"] = round(cap["initial"].get("brightness", 1.0) * bratio, 4)
+    if cap.get("lightmap"):
+        # Colour = measured stroke-core colour (fixed). Weight follows the stroke thickness (typography JND);
+        # the remaining level difference goes into a bounded gain.
+        typo = ref.get("_typo") or {}
+        strokes = typo.get("stroke")
+        if strokes and strokes[0] and strokes[1] and abs(strokes[1] / strokes[0] - 1) > 0.04:
+            step = 25 if strokes[1] < strokes[0] else -25
+            cap["font"]["weight"] = int(max(100, min(900, cap["font"]["weight"] + step)))
+            cap["font"]["variation"] = f"'wght' {cap['font']['weight']}, 'opsz' 32"
+        else:
+            cap["lightmap"]["gain"] = round(float(min(1.15, max(0.85, cap["lightmap"].get("gain", 1.0) * ref.get("_level_ratio", 1.0)))), 4)
+    elif cap.get("shine"):
+        # Rendered ink reads darker than its CSS colour (antialiasing); scale the base and the highlight by the
+        # measured ratio of settled brightness, so the next pass lands on the reference level.
+        def scaled(hexcol, r):
+            v = min(255, int(round(int(hexcol[1:3], 16) * r)))
+            return "#%02x%02x%02x" % (v, v, v)
+        level_ratio = ref.get("_level_ratio", bratio)
+        base_v = int(cap["shine"]["base"][1:3], 16); hi_v = int(cap["shine"]["highlight"][1:3], 16)
+        new_base = min(255.0, base_v * level_ratio)
+        # Amplitudes stay <= 1 (a clipped band flattens and shifts its peak); only the two colours move.
+        wanted_hi = new_base + (hi_v - base_v) * level_ratio * ref.get("_excess_ratio", 1.0)
+        if wanted_hi > 255.0:
+            # No headroom above white: a bolder stroke lifts the mean ink level, so the base can come down.
+            cap["font"]["weight"] = min(900, cap["font"]["weight"] + 25)
+            cap["font"]["variation"] = f"'wght' {cap['font']['weight']}, 'opsz' 32"
+        new_hi = min(255.0, wanted_hi)
+        cap["shine"]["base"] = "#%02x%02x%02x" % ((int(round(new_base)),) * 3)
+        cap["shine"]["highlight"] = "#%02x%02x%02x" % ((int(round(new_hi)),) * 3)
+        cap["initial"]["brightness"] = 1.0
+    return params
+
+
+def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--video", required=True); ap.add_argument("--start", type=float, required=True)
+    ap.add_argument("--end", type=float, required=True); ap.add_argument("--motion", required=True)
+    ap.add_argument("--words", required=True); ap.add_argument("--passes", type=int, default=6)
+    ap.add_argument("--target", type=float, default=0.99)
+    ap.add_argument("--font", default=None)
+    ap.add_argument("--fresh", action="store_true", help="rebuild from the measurements instead of the best version")
+    a = ap.parse_args()
+    # Font: --font, else the best free match measured for this reference (references/<slug>/font-match.json,
+    # zrmd.analyze.fontmatch), else Inter.
+    font = a.font
+    if not font:
+        match = settings.path("workshop") / "references" / Path(a.video).parent.name / "font-match.json"
+        if match.exists():
+            data = json.loads(match.read_text(encoding="utf-8"))
+            ranking = data.get("ranking") or data.get("top") or data.get("results") or []
+            if ranking:
+                font = ranking[0].get("file")
+                if font and not Path(font).is_absolute():
+                    font = str(settings.REPO / "datasets" / font)
+    font = font or str(settings.REPO / "fonts" / "InterVariable.ttf")
+    print(f"font {font}", flush=True)
+    motion = Path(a.motion); motion.mkdir(parents=True, exist_ok=True)
+    meta = versions.read_json(motion / "motion.json", {}) or {}
+    meta.update({"id": motion.name, "recipe": "textcard", "title": meta.get("title") or f"Caption, {a.words}",
+                 "source": {"slug": Path(a.video).parent.name, "start": a.start, "end": a.end},
+                 "tags": sorted(set((meta.get("tags") or []) + ["caption", Path(a.video).parent.name]))})
+    versions.write_json(motion / "motion.json", meta)
+    ref = textcard.measure(a.video, a.start, a.end)
+    textcard.save(motion / "reference-measures.json", {k: v for k, v in ref.items() if k != "ocr"})
+    params = textcard.build_params(ref, a.words, font)
+    best = None
+    if not a.fresh:
+        # HDA rule: the next version starts from the best measured one, never from a blank page.
+        prior = None
+        for v in versions.list_versions(motion):
+            fid = versions.read_json(motion / v / "fidelity.json")
+            if fid and (prior is None or fid.get("score", 0) > prior[1]):
+                prior = (v, fid.get("score", 0))
+        if prior:
+            old = versions.read_json(motion / prior[0] / "params.json")
+            cap_old = next((l for l in old["layers"] if l["id"] == "caption"), None)
+            if cap_old and cap_old.get("text") == a.words:
+                best = (prior[1], prior[0])
+                print(f"resume from {prior[0]} score={prior[1]:.4f}", flush=True)
+                # Start with one correction of the best version (re-rendering it unchanged would teach nothing).
+                rep0 = versions.read_json(motion / prior[0] / "fidelity.json")
+                ref["_typo"] = rep0.get("typography_detail") or {}
+                bm0 = rep0.get("brightness_map") or {}
+                if bm0.get("ref_level") and bm0.get("out_level"):
+                    ref["_level_ratio"] = bm0["ref_level"] / bm0["out_level"]
+                track0 = measure_render(str(motion / prior[0] / "render.mp4"), old["canvas"]["frames"], old["canvas"]["fps"])
+                params = correct(old, ref, track0, a.start) if track0 else old
+    for k in range(a.passes):
+        vdir = versions.create_version(motion, params, note=f"pass {k + 1}: measured build" if k == 0 else f"pass {k + 1}: closed-loop correction")
+        project = hf.cook(params, vdir)
+        lint_report = json.loads(lint(project))
+        out = render(project, vdir / "render.mp4")
+        frames, fps = params["canvas"]["frames"], params["canvas"]["fps"]
+        group_cfg = settings.get("analysis.layers"); group_cfg["group"] = True
+        rep = fidelity.shot_report(a.video, str(out), a.start, a.end, mask_boxes=None, cfg=group_cfg)
+        rep["lint_ok"] = lint_report.get("ok")
+        (vdir / "fidelity.json").write_text(json.dumps(rep, indent=2, default=float) + "\n", encoding="utf-8")
+        print(f"{vdir.name} score={rep['score']:.4f} dims={rep['dimensions']} lint={rep['lint_ok']}", flush=True)
+        if best is None or rep["score"] > best[0]:
+            best = (rep["score"], vdir.name)
+        if rep["score"] >= a.target:
+            break
+        ref["_typo"] = rep.get("typography_detail") or {}
+        bm = rep.get("brightness_map") or {}
+        if bm.get("ref_level") and bm.get("out_level"):
+            ref["_level_ratio"] = bm["ref_level"] / bm["out_level"]
+        if bm.get("ref_excess") and bm.get("out_excess"):
+            ref["_excess_ratio"] = bm["ref_excess"] / max(bm["out_excess"], 1e-6)
+        track = measure_render(str(out), frames, fps)
+        if track is None:
+            print("render has no text group; stop", flush=True); break
+        params = correct(json.loads((vdir / "params.json").read_text()), ref, track, a.start)
+    print(json.dumps({"best_version": best[1], "best_score": best[0]}), flush=True)
+    return 0 if best and best[0] >= a.target else 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())

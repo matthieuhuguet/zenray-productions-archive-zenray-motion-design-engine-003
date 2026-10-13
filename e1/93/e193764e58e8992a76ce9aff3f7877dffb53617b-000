@@ -1,0 +1,325 @@
+#!/usr/bin/env python3
+# 12 October 2026: task MI-other, iteration on the "other" stem of the onekey-pro-2 music benchmark (private, 1:1,
+# never published, no reference sample in a render). Shared modules are read-only; the code is zrmd/audio/stems/other.py.
+#   IterateOther.py build [--set key=json ...] [--dev-rounds N] [--no-dev] [--notes FILE] [--label TEXT]
+#       re-transcribe (or reuse --notes), fit the timbre tables and per-note dev tables, fit residual, eq, automation,
+#       stereo, score with the M3 critic, write stem-iter/other/V_NNN (other.wav, params.json, scores.json,
+#       score-other.json, meta.json); never overwrites.
+#   IterateOther.py proxy [--set key=json ...] [--tag NAME]   same without dev tables and without writing a version
+#       (fast ranking of transcription settings; appends to stem-iter/other/proxy-log.jsonl)
+#   IterateOther.py refx --version V_NNN [--set fxSpan=..., eqMode=..., eqPost=...]   re-fit only the fx chain
+#   IterateOther.py render --version V_NNN                    re-render a version from its params.json and notes
+#   IterateOther.py selftest                                  transcriber proven both ways on a known synthetic score
+#   IterateOther.py bedtest                                   steady residual bed proven both ways (13 October 2026)
+#   IterateOther.py best                                      copy the best version's notes to stem-iter/other/score-other.json
+# Settings: zrmd/audio/stems/other.py TRANSCRIBE_DEFAULTS (the interface), overridden by --set (keys of that dict).
+# At most 4 worker processes (the machine is shared). FR : iteration sur la piste other, versions jamais ecrasees.
+import os
+
+for _k in ("OMP_NUM_THREADS", "VECLIB_MAXIMUM_THREADS", "OPENBLAS_NUM_THREADS", "MKL_NUM_THREADS"):
+    os.environ.setdefault(_k, "1")
+import argparse
+import copy
+import json
+import sys
+import time
+from pathlib import Path
+
+import numpy as np
+
+ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(ROOT))
+from zrmd.audio import resynth as RS  # noqa: E402
+from zrmd.audio.stems import other as O  # noqa: E402
+
+BASE = "V_034"
+
+
+def out_dir(P):
+    d = Path(P["paths"]["bench"]) / "stem-iter" / "other"
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
+
+def next_version(d: Path) -> Path:
+    for i in range(1, 1000):
+        v = d / f"V_{i:03d}"
+        try:
+            v.mkdir()
+            return v
+        except FileExistsError:
+            continue
+    raise SystemExit("no free version")
+
+
+def parse_set(items):
+    over = {}
+    for it in items or []:
+        k, _, raw = it.partition("=")
+        try:
+            over[k] = json.loads(raw)
+        except json.JSONDecodeError:
+            over[k] = raw
+    return over
+
+
+def score_with(ctx, notes):
+    """The base score with the other voices replaced; extra roles (duration split) are merged into their register
+    voice, for the stem's event list only (diagnosis and plossEvents)."""
+    s = copy.deepcopy(ctx["score"])
+    for r in O.ROLES:
+        s["voices"].setdefault(r, {"kind": "poly"})["notes"] = sorted([e for k, v in notes.items() if O.base_role(k) == r for e in v], key=lambda e: e["t"])
+    return s
+
+
+def evaluate(ctx, x_mono, x_stereo, notes, C):
+    """Critic tfBands plus diagnosis, the stable bar-level ploss of the stem, and the mix with this stem swapped
+    into the base version (same mix bus). FR : scores du critique, ploss par mesure, effet sur le mixage."""
+    P, sr = ctx["P"], ctx["sr"]
+    cmp = C.compare(ctx["ref"], x_mono, sr)
+    times = np.arange(cmp["d"].shape[1]) * C.CFG["hop"] / sr
+    sc = score_with(ctx, notes)
+    secs = [{"start": s["start"], "end": s["end"]} for s in sc["sections"]]
+    diag = C.diagnose(cmp, times, secs, RS.stem_events(sc, "other"))
+    _, stable = RS._stable_job(("other", ctx["ref"], x_mono[: len(ctx["ref"])], sc, sr, P))
+    bench = ctx["bench"] / BASE
+    stems = {k: RS._read(bench / "stems" / f"{k}.wav", sr) for k in RS.STEMS if k != "other"}
+    stems["other"] = x_stereo
+    mix = RS.apply_mix_bus(stems, ctx["prm"]["mixBus"], sr, P)
+    ref_mix = RS.load_reference(P)["mix"]
+    mix_tf = C.compare(RS.mono(ref_mix), RS.mono(mix), sr)["score"]
+    return {"tfBands": round(cmp["score"], 3), "E": round(cmp["E"], 4), "plossBarNoOnset": stable["plossBarNoOnset"],
+            "plossEvents": stable["plossEvents"], "mixTfBandsSwapped": round(mix_tf, 3), "diagnosis": diag}
+
+
+def run(a, write: bool):
+    t0 = time.time()
+    ctx = O.context(BASE)
+    P, sr, n = ctx["P"], ctx["sr"], ctx["n"]
+    C = O.critic()
+    T = {**O.TRANSCRIBE_DEFAULTS, **parse_set(a.set)}
+    tinfo = None
+    if a.notes:
+        notes = json.loads(Path(a.notes).read_text())
+        notes = notes.get("notes", notes)
+    elif T.get("source") == "base":
+        notes = O.notes_from_score(ctx["score"])
+        for r in notes:
+            for e in notes[r]:
+                e.pop("dev", None)
+    else:
+        notes, tinfo = O.transcribe_other(ctx["ref"], sr, T)
+    print(f"transcribed {({r: len(v) for r, v in notes.items()})} {time.time() - t0:.0f}s", flush=True)
+    voices, notes, finfo = O.fit_timbres(notes, ctx, dev=write and not a.no_dev, rounds=a.dev_rounds,
+                                         calib_rounds=T.get("calibRounds"), P_over=T.get("pOver"))
+    print(f"timbres {time.time() - t0:.0f}s", flush=True)
+    seeds = O.seeds_of(ctx["prm"], P, list(notes))
+    dry = O.render_dry(voices, notes, P, n, seeds)
+    sc = score_with(ctx, notes)
+    fx = O.fit_fx(dry, ctx, sc, T.get("fxSpan", "bar"), T.get("eqMode", "power"), T.get("eqPost", False),
+                   T.get("residualMarginDb"), T.get("automationSmoothFrames"), T.get("bed"),
+                   T.get("automationCrossoverHz"), T.get("dryHighpassHz"))
+    x = O.apply_fx(dry, fx, sc, P, n)
+    st = RS.apply_stereo(x, fx.get("stereo"), sr, P)
+    dry_tf = round(O.tf_score(ctx["ref"], dry, sr, C), 3)
+    if not write:
+        res = {"date": "12 October 2026", "tag": a.tag, "set": parse_set(a.set), "dryTfBands": dry_tf,
+               "tfBands": round(O.tf_score(ctx["ref"], x, sr, C), 3), "transcription": tinfo, "seconds": round(time.time() - t0, 1)}
+        with open(out_dir(P) / "proxy-log.jsonl", "a") as f:
+            f.write(json.dumps(res) + "\n")
+        print(json.dumps(res), flush=True)
+        return res
+    ev = evaluate(ctx, x, st, notes, C)
+    ev["dryTfBands"] = dry_tf
+    d = next_version(out_dir(P))
+    RS.write_stereo(d / "other.wav", st, sr)
+    prm = {"format": "zrmd.stem-iter/1", "date": "12 October 2026", "stem": "other", "base": BASE, "version": d.name,
+           "_doc": "12 October 2026: procedural controls of this other-stem candidate: transcribe = settings of the "
+                   "re-transcription (zrmd/audio/stems/other.py), voices = measured timbre tables and macros of the three "
+                   "voices (edit freely), stemFx = residual, per-bar eq, automation, stereo; notes with their per-note dev "
+                   "tables are in score-other.json. Re-render: Scripts/IterateOther.py render --version <this>.",
+           "transcribe": T, "devRounds": a.dev_rounds, "dev": not a.no_dev, "seeds": seeds,
+           "voices": {r: voices[r] for r in notes}, "stemFx": fx, "lengthSamples": n}
+    (d / "params.json").write_text(json.dumps(prm, indent=1) + "\n")
+    (d / "score-other.json").write_text(json.dumps({"format": "zrmd.score-other/1", "date": "12 October 2026",
+                                                    "transcription": tinfo, "notes": notes}) + "\n")
+    base_scores = json.loads((ctx["bench"] / BASE / "scores.json").read_text())["headline"]["other"]
+    (d / "scores.json").write_text(json.dumps({"date": "12 October 2026", "scorer": "Scripts/MusicCritic.py compare (third-octave tfBands)",
+                                               "other": ev, "base": {"version": BASE, "tfBands": base_scores["tfBands"],
+                                                                     "plossBarNoOnset": base_scores["plossBarNoOnset"],
+                                                                     "plossEvents": base_scores["plossEvents"]},
+                                               "fit": finfo, "transcription": tinfo}, indent=1) + "\n")
+    (d / "meta.json").write_text(json.dumps({"date": "12 October 2026", "private": True, "kind": "stem-iteration", "stem": "other",
+                                             "label": a.label, "seconds": round(time.time() - t0, 1)}, indent=1) + "\n")
+    print(json.dumps({"version": d.name, "tfBands": ev["tfBands"], "dry": dry_tf, "plossBarNoOnset": ev["plossBarNoOnset"],
+                      "plossEvents": ev["plossEvents"], "mixSwapped": ev["mixTfBandsSwapped"], "seconds": round(time.time() - t0)}), flush=True)
+    return ev
+
+
+def cmd_refx(a):
+    """12 October 2026: keep a version's notes, dev tables and timbre tables, re-fit only the fx chain with the fx
+    settings of --set (fxSpan, eqMode, eqPost), write a new version. FR : seule la chaine d'effets est re-mesuree."""
+    t0 = time.time()
+    ctx = O.context(BASE)
+    P, sr, n = ctx["P"], ctx["sr"], ctx["n"]
+    C = O.critic()
+    src = out_dir(P) / a.version
+    prm0 = json.loads((src / "params.json").read_text())
+    so = json.loads((src / "score-other.json").read_text())
+    notes = so["notes"]
+    T = {**prm0["transcribe"], **parse_set(a.set)}
+    dry = O.render_dry(prm0["voices"], notes, P, n, prm0["seeds"])
+    sc = score_with(ctx, notes)
+    fx = O.fit_fx(dry, ctx, sc, T.get("fxSpan", "bar"), T.get("eqMode", "power"), T.get("eqPost", False),
+                   T.get("residualMarginDb"), T.get("automationSmoothFrames"), T.get("bed"),
+                   T.get("automationCrossoverHz"), T.get("dryHighpassHz"))
+    x = O.apply_fx(dry, fx, sc, P, n)
+    st = RS.apply_stereo(x, fx.get("stereo"), sr, P)
+    ev = evaluate(ctx, x, st, notes, C)
+    ev["dryTfBands"] = round(O.tf_score(ctx["ref"], dry, sr, C), 3)
+    d = next_version(out_dir(P))
+    RS.write_stereo(d / "other.wav", st, sr)
+    prm = {**prm0, "version": d.name, "parent": a.version, "transcribe": T, "stemFx": fx}
+    (d / "params.json").write_text(json.dumps(prm, indent=1) + "\n")
+    (d / "score-other.json").write_text(json.dumps(so) + "\n")
+    base = json.loads((src / "scores.json").read_text())
+    (d / "scores.json").write_text(json.dumps({"date": "12 October 2026", "scorer": base["scorer"], "other": ev, "base": base["base"],
+                                               "fit": base.get("fit"), "transcription": base.get("transcription"), "parent": a.version}, indent=1) + "\n")
+    (d / "meta.json").write_text(json.dumps({"date": "12 October 2026", "private": True, "kind": "stem-iteration", "stem": "other",
+                                             "label": a.label, "parent": a.version, "seconds": round(time.time() - t0, 1)}, indent=1) + "\n")
+    print(json.dumps({"version": d.name, "parent": a.version, "tfBands": ev["tfBands"], "plossBarNoOnset": ev["plossBarNoOnset"],
+                      "plossEvents": ev["plossEvents"], "mixSwapped": ev["mixTfBandsSwapped"], "seconds": round(time.time() - t0)}), flush=True)
+
+
+def cmd_render(a):
+    ctx = O.context(BASE)
+    P, sr, n = ctx["P"], ctx["sr"], ctx["n"]
+    d = out_dir(P) / a.version
+    prm = json.loads((d / "params.json").read_text())
+    notes = json.loads((d / "score-other.json").read_text())["notes"]
+    dry = O.render_dry(prm["voices"], notes, P, n, prm["seeds"])
+    x = O.apply_fx(dry, prm["stemFx"], score_with(ctx, notes), P, n)
+    st = RS.apply_stereo(x, prm["stemFx"].get("stereo"), sr, P)
+    ref = RS.mono(RS._read(d / "other.wav", sr))
+    diff = float(np.abs(RS.mono(st)[: len(ref)] - ref[: len(st)]).max())
+    print(json.dumps({"version": a.version, "tfBands": round(O.tf_score(ctx["ref"], x, sr), 3), "maxAbsDiffToFile": diff}))
+    return diff
+
+
+def cmd_selftest(a):
+    """Green: a known synthetic other-like score (chords and a line, rendered by the base version's measured timbre
+    models) is re-transcribed and matched note by note (onset within 50 ms, same MIDI). Red: the same transcription
+    against the truth shifted by 80 ms and one semitone. Exit 0 only when green >= 0.7 and red <= 0.2."""
+    from zrmd.audio import transcribe as TR
+    ctx = O.context(BASE)
+    P, sr = ctx["P"], ctx["sr"]
+    rng = np.random.default_rng(5)
+    beat = 60.0 / 100.0
+    truth = []
+    chords = [[60, 64, 67], [62, 65, 69], [57, 60, 64], [59, 62, 67]]
+    for bar in range(8):
+        ch = chords[bar % 4]
+        for k in range(4):
+            t = 0.5 + (bar * 4 + k) * beat
+            for m in ch:
+                truth.append({"t": round(t, 4), "dur": round(beat * 0.8, 4), "midi": m + 12, "levelDb": -30.0 + float(rng.uniform(-2, 2))})
+        for k in range(2):
+            truth.append({"t": round(0.5 + (bar * 4 + 2 * k + 1) * beat + 0.15, 4), "dur": 0.3, "midi": 84 + int(rng.integers(0, 5)), "levelDb": -32.0})
+    n = int((0.5 + 32 * beat + 1.0) * sr)
+    roles = {r: [] for r in O.ROLES}
+    for e in truth:
+        r = "otherLow" if e["midi"] <= 60 else ("otherMid" if e["midi"] <= 72 else "otherHigh")
+        roles[r].append(e)
+    x = O.render_dry(ctx["prm"]["voices"], roles, P, n, O.seeds_of(ctx["prm"], P))
+    x = x + 1e-4 * np.random.default_rng(1).standard_normal(n).astype(np.float32)
+    over = parse_set(a.set)  # 12 October 2026: --set sabotages the transcriber to prove the red side
+    est, info = O.transcribe_other(x, sr, {**O.TRANSCRIBE_DEFAULTS, **over})
+    flat = [e for v in est.values() for e in v]
+    green = TR.note_f(truth, flat, 0.05)
+    shifted = [dict(e, t=e["t"] + 0.08, midi=e["midi"] + 1) for e in truth]
+    red = TR.note_f(shifted, flat, 0.05)
+    ok = green["f"] >= 0.7 and red["f"] <= 0.2
+    res = {"green": green, "red": red, "pass": ok, "set": over, "transcription": info}
+    print(json.dumps(res, indent=1))
+    (out_dir(P) / ("selftest-sabotage.json" if over else "selftest.json")).write_text(json.dumps({"date": "12 October 2026", **res}, indent=1) + "\n")
+    return ok
+
+
+def cmd_bedtest(a):
+    """13 October 2026: proves the steady bed both ways on a flat 0 dB table over 10 s (lane off). Green: the default
+    bed matches resynth.render_residual's mean band level within 0.5 dB above 150 Hz and its frame-to-frame band
+    scatter stays under 0.5 dB. Red: with spacingBins 1 (adjacent sines beat inside a frame) the scatter exceeds 0.3 dB (measured 0.77 against 0.016 green and 0.97 for the random bed),
+    and with levelDb 0 the level misses by more than 3 dB. Exit 0 only when all hold.
+    FR : preuve du lit stable dans les deux sens (niveau et stabilite, puis deux sabotages)."""
+    sys.path.insert(0, str(ROOT / "Scripts"))
+    import MusicCritic as C
+    P = copy.deepcopy(RS.params())
+    sr = P["sampleRate"]
+    n = sr * 10
+    P["residual"]["followLane"] = False
+    c = RS.band_centres(P, sr)
+    res = {"centresHz": list(c), "nFft": P["residual"]["nFft"], "hop": P["residual"]["hop"],
+           "sections": [{"start": 0.0, "end": 10.0, "bandsDb": [0.0] * len(c)}]}
+    cc, W = C.bands(sr)
+    m = cc > 150
+    ra = C.band_power(RS.render_residual(res, n, sr, P, None, 0.05, 1), sr, W)[:, 3:-3]
+
+    def stats(over):
+        rb = C.band_power(O.render_residual_steady(res, n, sr, P, None, 0.05, 1, over), sr, W)[:, 3:-3]
+        return {"levelErrDb": round(float(np.abs((ra - rb).mean(1))[m].mean()), 3), "scatterDb": round(float(rb.std(1)[m].mean()), 3),
+                "randomBedScatterDb": round(float(ra.std(1)[m].mean()), 3)}
+    green, red_beat, red_level = stats({}), stats({"spacingBins": 1}), stats({"levelDb": 0.0})
+    ok = green["levelErrDb"] < 0.5 and green["scatterDb"] < 0.5 and red_beat["scatterDb"] > 0.3 and red_level["levelErrDb"] > 3.0
+    res_ = {"date": "13 October 2026", "green": green, "redSpacing1": red_beat, "redLevel0": red_level, "pass": ok}
+    print(json.dumps(res_, indent=1))
+    (out_dir(P) / "bedtest.json").write_text(json.dumps(res_, indent=1) + "\n")
+    return ok
+
+
+def cmd_best():
+    P = RS.params()
+    d = out_dir(P)
+    rows = []
+    for v in sorted(d.glob("V_*")):
+        f = v / "scores.json"
+        if f.exists():
+            rows.append((json.loads(f.read_text())["other"]["tfBands"], v.name))
+    rows.sort(reverse=True)
+    best = rows[0]
+    src = json.loads((d / best[1] / "score-other.json").read_text())
+    sc = json.loads((d / best[1] / "scores.json").read_text())
+    (d / "score-other.json").write_text(json.dumps({**src, "bestVersion": best[1], "tfBands": best[0],
+                                                    "scores": {k: v for k, v in sc["other"].items() if k != "diagnosis"},
+                                                    "base": sc["base"]}) + "\n")
+    print(json.dumps({"best": best[1], "tfBands": best[0], "all": rows}))
+
+
+def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("cmd", choices=["build", "proxy", "refx", "render", "selftest", "best", "bedtest"])
+    ap.add_argument("--set", action="append")
+    ap.add_argument("--dev-rounds", type=int, default=None)
+    ap.add_argument("--no-dev", action="store_true")
+    ap.add_argument("--notes")
+    ap.add_argument("--version")
+    ap.add_argument("--label", default="")
+    ap.add_argument("--tag", default="")
+    a = ap.parse_args()
+    if a.cmd == "build":
+        run(a, True)
+    elif a.cmd == "proxy":
+        run(a, False)
+    elif a.cmd == "refx":
+        cmd_refx(a)
+    elif a.cmd == "render":
+        sys.exit(0 if cmd_render(a) < 1e-3 else 1)
+    elif a.cmd == "bedtest":
+        sys.exit(0 if cmd_bedtest(a) else 1)
+    elif a.cmd == "selftest":
+        sys.exit(0 if cmd_selftest(a) else 1)
+    else:
+        cmd_best()
+
+
+if __name__ == "__main__":
+    main()

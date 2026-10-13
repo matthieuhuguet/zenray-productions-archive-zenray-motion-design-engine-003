@@ -1,0 +1,51 @@
+# 12 October 2026: pluck_ks, Karplus-Strong plucked string evaluated exactly in the frequency domain, so that every
+# parameter (pitch included, as a fractional loop delay) is differentiable:
+#   Y(w) = E(w) / (1 - rho L(w) exp(-j w P)),  L(w) = (1 - S) + S exp(-j w),  P = sr / f0 - S,
+#   rho = 10 ** (-3 / (f0 decay_s)) per period (fundamental T60), S = 0.5 (1 - brightness),
+# with E a fixed-seed noise burst one period long (soft edges). The grid is long enough that the tail does not wrap.
+# Derived from Karplus and Strong (CMJ 7(2), 1983) and Jaffe and Smith (CMJ 7(2), 1983). FR : corde pincée exacte en
+# fréquence, différentiable jusqu'à la hauteur.
+import math
+
+import torch
+
+from zrmd.audio.bank import Block, db_to_amp, envelope, stft_filter
+from zrmd.audio import fxdsp as F
+from zrmd.audio.fxdsp import param as P
+
+META = {"family": "physical", "kind": "source",
+        "description": "Karplus-Strong plucked string computed exactly in the frequency domain (fractional loop delay, averaging loop filter). Plucks, harp, koto, pizzicato UI notes. (12 October 2026)",
+        "tags": ["tonal", "pluck", "string", "karplus-strong", "physical"],
+        "sources": [{"what": "plucked string loop", "url": None, "reference": "K. Karplus and A. Strong, Digital synthesis of plucked-string and drum timbres, CMJ 7(2), 1983; D. Jaffe and J. O. Smith, Extensions of the Karplus-Strong algorithm, CMJ 7(2), 1983", "licence": F.SOURCE}],
+        "licence": "original"}
+GRID_EXTRA_S = 1.5
+
+
+class PluckKs(Block):
+    ID = "pluck_ks"
+    PARAMS = [
+        P("f0_hz", "Hz", 60, 2000, 196, "log", "pitch"),
+        P("decay_s", "s (T60)", 0.1, 2.5, 1.2, "log", "decay of the fundamental"),
+        P("brightness", "0..1", 0.0, 1.0, 0.5, "lin", "0 strong loop lowpass (dull), 1 none (bright)"),
+        P("amp_db", "dBFS RMS", -60, 0, -28, "lin", "RMS level over the window (default -28, 12 October 2026: peak under 0 dBFS)"),
+        P("onset_s", "s", 0.0, 0.25, 0.02, "lin", "start time in the window"),
+    ]
+
+    def synth(self, v, t, sr):
+        n = t.shape[0]
+        S = 0.5 * (1.0 - v["brightness"])
+        period = sr / v["f0_hz"]
+        P_ = period - S
+        rho = torch.pow(10.0, -3.0 / (v["f0_hz"] * v["decay_s"]))
+        u = (t - v["onset_s"]) * sr
+        burst = self.noise(n, t.device) * torch.sigmoid(u) * torch.sigmoid(period - u)
+
+        def H(w):
+            loop = ((1.0 - S) + S * F.delay_phase(w, 1.0)) * F.delay_phase(w, P_) * rho
+            return 1.0 / (1.0 - loop)
+
+        y = F.apply_response(burst, H, int(GRID_EXTRA_S * sr))
+        return db_to_amp(v["amp_db"]) * y / torch.sqrt(torch.mean(y * y) + 1e-12)
+
+
+BLOCK = PluckKs

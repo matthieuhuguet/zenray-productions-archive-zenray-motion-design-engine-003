@@ -1,0 +1,87 @@
+{
+  "id": "room_tone",
+  "family": "ambience",
+  "description": "Room tone: stationary tilted noise between a high-pass and a low-pass, plus a mains hum, faded in. (12 October 2026)",
+  "tags": [
+    "ambience",
+    "room tone",
+    "air",
+    "hum",
+    "background",
+    "noise"
+  ],
+  "sources": [
+    {
+      "what": "spectrally shaped noise and harmonic hum",
+      "url": null,
+      "licence": "original (derived from the mathematics, no code copied)"
+    }
+  ],
+  "licence": "original",
+  "params": [
+    {
+      "name": "tilt_db_oct",
+      "unit": "dB/octave",
+      "min": -9.0,
+      "max": 3.0,
+      "default": -3.0,
+      "scale": "lin",
+      "description": "spectral slope (-3 is pink)"
+    },
+    {
+      "name": "hp_hz",
+      "unit": "Hz",
+      "min": 20.0,
+      "max": 400.0,
+      "default": 60.0,
+      "scale": "log",
+      "description": "high-pass cutoff"
+    },
+    {
+      "name": "lp_hz",
+      "unit": "Hz",
+      "min": 1500.0,
+      "max": 20000.0,
+      "default": 8000.0,
+      "scale": "log",
+      "description": "low-pass cutoff"
+    },
+    {
+      "name": "hum_hz",
+      "unit": "Hz",
+      "min": 45.0,
+      "max": 130.0,
+      "default": 50.0,
+      "scale": "log",
+      "description": "hum fundamental"
+    },
+    {
+      "name": "hum_db",
+      "unit": "dB re noise",
+      "min": -60.0,
+      "max": 0.0,
+      "default": -24.0,
+      "scale": "lin",
+      "description": "hum level"
+    },
+    {
+      "name": "fade_s",
+      "unit": "s",
+      "min": 0.002,
+      "max": 0.4,
+      "default": 0.05,
+      "scale": "log",
+      "description": "fade-in length"
+    },
+    {
+      "name": "amp_db",
+      "unit": "dBFS",
+      "min": -60.0,
+      "max": 0.0,
+      "default": -24.0,
+      "scale": "lin",
+      "description": "peak level of the main layer"
+    }
+  ],
+  "date": "12 October 2026"
+}

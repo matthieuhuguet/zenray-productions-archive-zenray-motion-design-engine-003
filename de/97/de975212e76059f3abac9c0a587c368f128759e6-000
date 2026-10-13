@@ -1,0 +1,287 @@
+#!/usr/bin/env python3
+# 12 October 2026: task MI, bass stem iteration. Fits per note a release time, a low-pass tilt (dB per octave above a
+# corner), an attack gain and a sustain level against the reference bass stem, in MusicCritic's third-octave domain
+# (zrmd/audio/stems/bass.py), then alternates with a re-measure of the stem's residual bed and per-bar equaliser
+# (resynth.measure_residual / measure_eq, the same calls as ResynthMusic.fit_stem_fx). Every candidate is a new
+# folder stem-iter/bass/V_NNN (never overwritten) with bass.wav, params.json and scores.json (MusicCritic diagnosis
+# plus resynth's stable scores: tfBands, plossEvents, plossBarNoOnset).
+#   IterateBass.py selftest            both ways: neutral fit = V_034 bit for bit (green); a sabotaged tilt drops the
+#                                      critic by >= 3 (red); band model E agrees with the critic within 0.05
+#   IterateBass.py run [--base V_034] [--max 12]
+#   IterateBass.py mix --version V_NNN the full mix of the base with this bass stem (mix bus replayed), scored
+# FR : iteration de la piste basse, ajustement par note puis re-mesure de l'egaliseur, une version par essai.
+import os
+
+for _k in ("OMP_NUM_THREADS", "VECLIB_MAXIMUM_THREADS", "OPENBLAS_NUM_THREADS", "MKL_NUM_THREADS"):
+    os.environ.setdefault(_k, "1")
+import argparse
+import copy
+import json
+import sys
+import time
+from pathlib import Path
+
+import numpy as np
+
+ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(ROOT))
+sys.path.insert(0, str(ROOT / "Scripts"))
+from zrmd.audio import resynth as RS  # noqa: E402
+from zrmd.audio.stems import bass as BA  # noqa: E402
+import MusicCritic as MC  # noqa: E402
+
+# 12 October 2026: script settings (interface). FR : reglages du script.
+CFG = {
+    "bench": "/Users/zenray/.claude/tmp/tmp-zenray-motion-design/sound/onekey-pro-2/music-bench",
+    "out": "/Users/zenray/.claude/tmp/tmp-zenray-motion-design/sound/onekey-pro-2/music-bench/stem-iter/bass",
+    "base": "V_034",
+    "target": 99.0,
+    "plateau": 3,          # stop after this many versions without a tfBands gain
+    "minGain": 0.01,       # a gain smaller than this counts as no gain
+    "relModel": 1.0,       # release of the analysis render (longest grid value)
+    "keys": ["releaseS", "sustainDb", "attackDb", "cornerHz", "tiltDbOct"],
+    "sabotage": {"tiltDbOct": 24.0, "cornerHz": 120.0},
+    "selftestDropMin": 3.0,
+    "faderGrid": [-3.0, -2.0, -1.0, -0.5, 0.5, 1.0, 2.0, 3.0],  # dB moves tried per fader point and sweep
+    "faderSweeps": 2,
+    "model": "power",      # power (BandModel, run 1 to 3) or complex (ComplexModel, cross terms, 12 October 2026)
+    "bandAgreeTol": 0.05,
+    "complexAgreeTol": 0.005,
+}
+
+
+def log(*a):
+    print(time.strftime("%H:%M:%S"), *a, flush=True)
+
+
+def next_dir() -> Path:
+    out = Path(CFG["out"])
+    out.mkdir(parents=True, exist_ok=True)
+    k = 1
+    while True:
+        d = out / f"V_{k:03d}"
+        try:
+            d.mkdir()
+            return d
+        except FileExistsError:
+            k += 1
+
+
+def stable_scores(ref_m, ours_st, B):
+    _, s = RS._stable_job((BA.STEM, ref_m, RS.mono(ours_st)[: len(ref_m)], B["score"], B["sr"], B["P"]))
+    return s
+
+
+def write(d: Path, B, ours_st, fits, eq, res_table, ref_m, info):
+    RS.write_stereo(d / "bass.wav", ours_st, B["sr"])
+    diag = BA.critic_score(ref_m, ours_st, B["sr"], B)
+    st = stable_scores(ref_m, ours_st, B)
+    (d / "params.json").write_text(json.dumps({
+        "format": "zrmd.stem-iter/1", "date": "12 October 2026", "stem": BA.STEM, "base": CFG["base"],
+        "_doc": "12 October 2026: per-note bass shape (role:index -> releaseS, tiltDbOct above cornerHz, attackDb, sustainDb "
+                "from FIT.sustainStartS) on top of the base version's bass voice; eq and residual are this version's stem "
+                "equaliser and residual bed. Render: zrmd/audio/stems/bass.py render_notes + chain.",
+        "fit": {k: v for k, v in BA.FIT.items() if k != "grid"}, "notes": fits, "eq": eq, "residual": res_table, **info}, indent=1) + "\n")
+    sc = {"date": "12 October 2026", "critic": diag, "stable": st, "tfBands": diag["score"]}
+    (d / "scores.json").write_text(json.dumps(sc, indent=1) + "\n")
+    return sc
+
+
+def setup(base: str):
+    B = BA.load_base(Path(CFG["bench"]), base)
+    ref = RS.load_reference(B["P"])
+    ref_m = RS.mono(ref["stems"][BA.STEM])
+    return B, ref, ref_m
+
+
+def build_model(B, ref_m, fits, eq, res, gain):
+    """Analysis render with the long release, then the band model starting at fits."""
+    keys_all = [f"{p[2]}:{p[3]}" for p in BA.render_notes(B, None)[1]]
+    if CFG["model"] == "complex":  # 12 October 2026: analysis render = the current fits, with a long buffer
+        cur = {k: {**BA.FIT["neutral"], "releaseS": B["prm"]["voices"]["bass"]["macros"]["releaseS"], **fits.get(k, {}), "tailS": CFG["relModel"]} for k in keys_all}
+        _, parts = BA.render_notes(B, cur)
+        start = [{k_: v for k_, v in cur[f"{p[2]}:{p[3]}"].items() if k_ != "tailS"} for p in parts]
+        return BA.ComplexModel(B, ref_m, parts, res, gain, eq, start, CFG["relModel"]), start
+    long = {k: {**BA.FIT["neutral"], **fits.get(k, {"releaseS": B["prm"]["voices"]["bass"]["macros"]["releaseS"]}), "releaseS": CFG["relModel"]} for k in keys_all}
+    _, parts = BA.render_notes(B, long)
+    start = [{**BA.FIT["neutral"], "releaseS": B["prm"]["voices"][p[2]]["macros"]["releaseS"], **fits.get(f"{p[2]}:{p[3]}", {})} for p in parts]
+    return BA.BandModel(B, ref_m, parts, res, gain, eq, start, CFG["relModel"]), start
+
+
+def render_full(B, fits, eq, res, curve=None):
+    """Exact render; curve (fader lane, dB) freezes the automation, None keeps resynth's adaptive automation."""
+    dry, _ = BA.render_notes(B, fits)
+    g = None if curve is None else BA.gain_from_curve(B, curve)
+    return BA.chain(B, dry, res, eq, frozen_gain=g), dry
+
+
+def pre_fader(B, fits, eq, res):
+    dry, _ = BA.render_notes(B, fits)
+    return RS.mono(BA.chain(B, dry, res, eq, frozen_gain=np.ones(B["n"], np.float32)))
+
+
+def cmd_selftest(a):
+    B, ref, ref_m = setup(CFG["base"])
+    sr = B["sr"]
+    base_wav = RS._read(B["dir"] / "stems" / "bass.wav", sr)
+    res = BA.residual(B)
+    eq = B["prm"]["stemFx"]["bass"]["eq"]
+    st, dry = render_full(B, {}, eq, res)
+    diff = float(np.abs(st - base_wav).max())
+    s0 = MC.compare(ref_m, RS.mono(st), sr)["score"]
+    keys = [f"{p[2]}:{p[3]}" for p in BA.render_notes(B, None)[1]]
+    sab = {k: dict(CFG["sabotage"]) for k in keys}
+    st2, _ = render_full(B, sab, eq, res)
+    s1 = MC.compare(ref_m, RS.mono(st2), sr)["score"]
+    # Band model agreement with the critic on the neutral render (frozen automation gain from that render).
+    x_noaut = RS.mono(BA.chain(B, dry, res, eq, frozen_gain=np.ones(B["n"], np.float32)))
+    gain = BA.automation_gain(B, x_noaut)
+    M, _ = build_model(B, ref_m, {}, eq, res, gain)
+    Eb = M.E()
+    Ec = MC.compare(ref_m, RS.mono(st), sr)["E"]
+    # 12 October 2026: the complex model must match the critic on the neutral render (green) and see the sabotage
+    # the same way the critic does (red side), within complexAgreeTol.
+    CFG["model"] = "complex"
+    Mc, _ = build_model(B, ref_m, {}, eq, res, gain)
+    Ecx = Mc.E()
+    Ms, _ = build_model(B, ref_m, sab, eq, res, BA.automation_gain(B, RS.mono(BA.chain(B, BA.render_notes(B, sab)[0], res, eq, frozen_gain=np.ones(B["n"], np.float32)))))
+    Ecs = Ms.E()
+    Ecs_critic = MC.compare(ref_m, RS.mono(st2), sr)["E"]
+    CFG["model"] = "power"
+    ok = (diff == 0.0 and s0 - s1 >= CFG["selftestDropMin"] and abs(Eb - Ec) <= CFG["bandAgreeTol"]
+          and abs(Ecx - Ec) <= CFG["complexAgreeTol"] and abs(Ecs - Ecs_critic) <= CFG["complexAgreeTol"])
+    out = {"date": "12 October 2026", "neutralMaxDiff": diff, "neutralScore": round(s0, 3), "sabotageScore": round(s1, 3),
+           "bandModelE": round(Eb, 4), "criticE": round(Ec, 4), "complexModelE": round(Ecx, 4),
+           "complexModelSabotageE": round(Ecs, 4), "criticSabotageE": round(Ecs_critic, 4), "pass": ok}
+    print(json.dumps(out, indent=1))
+    Path(CFG["out"]).mkdir(parents=True, exist_ok=True)
+    (Path(CFG["out"]) / "selftest.json").write_text(json.dumps(out, indent=1) + "\n")
+    sys.exit(0 if ok else 1)
+
+
+def fit_round(B, ref_m, fits, eq, res, curve, keys, sweeps):
+    M, start = build_model(B, ref_m, fits, eq, res, BA.gain_from_curve(B, curve))
+    cur = list(start)
+    hist = [round(M.E(), 4)]
+    for _ in range(sweeps):
+        for j in range(len(M.notes)):
+            cur[j] = M.fit_note(j, cur[j], M.rel0, BA.FIT["grid"], keys)
+        hist.append(round(M.E(), 4))
+    new = {f"{nm['role']}:{nm['i']}": {k: cur[j][k] for k in list(BA.FIT["neutral"]) + ["bandDb"] if k in cur[j]} for j, nm in enumerate(M.notes)}
+    return new, hist
+
+
+def fader_round(B, ref_m, fits, eq, res, curve):
+    M, _ = build_model(B, ref_m, fits, eq, res, BA.gain_from_curve(B, curve))
+    e0 = M.E()
+    ff = BA.fit_fader_c if CFG["model"] == "complex" else BA.fit_fader
+    new = ff(M, B, curve, CFG["faderGrid"], CFG["faderSweeps"])
+    return new, [round(e0, 4), round(M.E(), 4)]
+
+
+def remeasure(B, ref_m, fits):
+    """Residual bed then per-bar equaliser, measured on this version's dry render (as ResynthMusic.fit_stem_fx)."""
+    P, sr = B["P"], B["sr"]
+    dry, _ = BA.render_notes(B, fits)
+    spans = RS.fx_spans(B["score"], P)
+    fx = copy.deepcopy(B["prm"]["stemFx"]["bass"])
+    x = dry * 10 ** (B["prm"].get("stemGainsDb", {}).get("bass", 0.0) / 20.0)
+    fx["residual"] = RS.measure_residual(ref_m, x, spans, sr, P, P["residual"].get("sectionGateDb", {}).get("bass"))
+    B2 = {**B, "prm": {**B["prm"], "stemFx": {**B["prm"]["stemFx"], "bass": fx}}}
+    res = BA.residual(B2)
+    fx["eq"] = RS.measure_eq(ref_m, x + res, spans, sr, P)
+    return fx["eq"], fx["residual"], res, B2
+
+
+def cmd_run(a):
+    CFG["base"] = a.base
+    if a.model:
+        CFG["model"] = a.model
+    B, ref, ref_m = setup(a.base)
+    eq = B["prm"]["stemFx"]["bass"]["eq"]
+    res_table = B["prm"]["stemFx"]["bass"].get("residual")
+    res = BA.residual(B)
+    fits: dict = {}
+    curve = None
+    best, best_v, flat = -1.0, None, 0
+    if a.resume:  # 12 October 2026: continue from a stem-iter version (its fits, eq, residual and fader lane)
+        q = json.loads((Path(CFG["out"]) / a.resume / "params.json").read_text())
+        fits, eq, res_table, curve = q["notes"], q["eq"], q["residual"], (np.asarray(q["faderDb"]) if q.get("faderDb") else None)
+        fx = {**B["prm"]["stemFx"]["bass"], "eq": eq, "residual": res_table}
+        B = {**B, "prm": {**B["prm"], "stemFx": {**B["prm"]["stemFx"], "bass": fx}}}
+        res = BA.residual(B)
+        best = json.loads((Path(CFG["out"]) / a.resume / "scores.json").read_text())["tfBands"]
+        best_v = a.resume
+    keep = (fits, eq, res_table, res, curve, B)
+    steps = a.plan.split(",")
+    for step in steps[: a.max]:
+        t0 = time.time()
+        info = {"step": step}
+        if step == "neutral":  # adaptive automation as in resynth (V_034 bit for bit)
+            pass
+        elif step == "freeze":  # the fader lane of the current render, frozen as a parameter
+            curve = BA.automation_curve_db(B, pre_fader(B, fits, eq, res))
+        elif step == "fit" or step.startswith("fit:"):
+            keys = CFG["keys"] if step == "fit" else step[4:].split("+")
+            if curve is None:
+                curve = BA.automation_curve_db(B, pre_fader(B, fits, eq, res))
+            fits, info["bandE"] = fit_round(B, ref_m, fits, eq, res, curve, keys, BA.FIT["sweeps"])
+        elif step == "fader":
+            if curve is None:
+                curve = BA.automation_curve_db(B, pre_fader(B, fits, eq, res))
+            curve, info["bandE"] = fader_round(B, ref_m, fits, eq, res, curve)
+        elif step == "remeasure":
+            eq, res_table, res, B = remeasure(B, ref_m, fits)
+        st, _ = render_full(B, fits, eq, res, curve)
+        d = next_dir()
+        info["faderDb"] = None if curve is None else [round(float(v), 3) for v in curve]
+        sc = write(d, B, st, fits, eq, res_table, ref_m, {**info, "parent": best_v, "resumedFrom": a.resume, "model": CFG["model"], "seconds": round(time.time() - t0, 1)})
+        s = sc["tfBands"]
+        log(f"{d.name} {step}: tfBands {s:.3f} plossBarNoOnset {sc['stable']['plossBarNoOnset']} plossEvents {sc['stable']['plossEvents']} {info.get('bandE')}")
+        if s > best + CFG["minGain"]:
+            best, best_v, flat = s, d.name, 0
+            keep = (fits, eq, res_table, res, curve, B)
+        else:
+            flat += 1
+            if a.revert:  # 12 October 2026: a step that lost is undone, the next step starts from the best state
+                fits, eq, res_table, res, curve, B = keep
+        if best >= CFG["target"] or (flat >= CFG["plateau"] and not a.no_stop):
+            break
+    log(f"best {best_v} {best:.3f}")
+
+
+def cmd_mix(a):
+    B, ref, ref_m = setup(CFG["base"])
+    sr = B["sr"]
+    stems = {k: RS._read(B["dir"] / "stems" / f"{k}.wav", sr) for k in RS.STEMS}
+    stems["bass"] = RS._read(Path(CFG["out"]) / a.version / "bass.wav", sr)
+    mix = RS.apply_mix_bus(stems, B["prm"].get("mixBus"), sr, B["P"], B["k"], B["score0"]["tempo"]["t0"])
+    base_mix = RS._read(B["dir"] / "mix.wav", sr)
+    rm = RS.mono(ref["mix"])
+    out = {"date": "12 October 2026", "version": a.version,
+           "mixTfBands": round(MC.compare(rm, RS.mono(mix), sr)["score"], 3),
+           "baseMixTfBands": round(MC.compare(rm, RS.mono(base_mix), sr)["score"], 3)}
+    print(json.dumps(out, indent=1))
+    (Path(CFG["out"]) / a.version / "mix-scores.json").write_text(json.dumps(out, indent=1) + "\n")
+
+
+def main():
+    ap = argparse.ArgumentParser()
+    sp = ap.add_subparsers(dest="cmd", required=True)
+    sp.add_parser("selftest")
+    r = sp.add_parser("run")
+    r.add_argument("--base", default=CFG["base"])
+    r.add_argument("--max", type=int, default=12)
+    r.add_argument("--plan", default="freeze,fit,fader,fit,fader,remeasure,fit,fader")
+    r.add_argument("--no-stop", action="store_true")
+    r.add_argument("--resume", default=None)
+    r.add_argument("--revert", action="store_true")
+    r.add_argument("--model", default=None)
+    m = sp.add_parser("mix")
+    m.add_argument("--version", required=True)
+    a = ap.parse_args()
+    {"selftest": cmd_selftest, "run": cmd_run, "mix": cmd_mix}[a.cmd](a)
+
+
+if __name__ == "__main__":
+    main()

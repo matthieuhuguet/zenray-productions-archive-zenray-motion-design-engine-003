@@ -1,0 +1,36 @@
+# 12 October 2026: tom_drum, four circular membrane modes (Bessel zero ratios 1, 1.594, 2.136, 2.296) each with its own
+# accumulated phase under one downward pitch bend, plus a short stick noise. Derived from the mathematics (ideal membrane).
+# FR : tom, modes de membrane circulaire et baguette.
+import torch
+
+from zrmd.audio import sfxdsp as D
+from zrmd.audio.bank import Block, db_to_amp, phase_from_freq
+
+RATIOS, AMPS, DECAYS = [1.0, 1.594, 2.136, 2.296], [1.0, 0.5, 0.3, 0.25], [1.0, 0.6, 0.45, 0.35]
+STICK_HZ, STICK_BW_OCT, STICK_T60 = 3000.0, 3.0, 0.004
+META = D.meta("drum", "Tom: four circular membrane modes with a downward pitch bend plus a stick noise.", ["drum", "tom", "membrane", "modal", "transient"], "ideal circular membrane modes", "Bessel function zeros of the circular membrane (Rayleigh, The Theory of Sound, 1877)")
+
+
+class TomDrum(Block):
+    ID = "tom_drum"
+    PARAMS = [
+        D.param("tune_hz", "Hz", 60, 500, 140, "log", "fundamental after the bend"),
+        D.param("decay_s", "s (T60)", 0.08, 2.0, 0.5, "log", "fundamental decay"),
+        D.param("bend_st", "semitones", 0.0, 12.0, 3.0, "lin", "pitch above the tune at the hit"),
+        D.param("bend_s", "s", 0.005, 0.2, 0.04, "log", "time constant of the bend"),
+        D.param("stick_db", "dB re membrane", -40, 0, -14, "lin", "stick noise level"),
+        D.AMP(-12.0), D.ONSET(),
+    ]
+
+    def synth(self, v, t, sr):
+        o, dev = v["onset_s"], t.device
+        u = torch.clamp(t - o, min=0.0)
+        f = v["tune_hz"] * torch.pow(2.0, v["bend_st"] / 12.0 * torch.exp(-u / v["bend_s"]))
+        y = 0.0
+        for r, a, d in zip(RATIOS, AMPS, DECAYS):  # one accumulated phase per mode (a wrapped phase cannot be scaled)
+            y = y + a * torch.sin(phase_from_freq(r * f * D.gate(t, o), sr)) * D.decay(t, o, v["decay_s"] * d)
+        stick = D.filtered(self.noise(t.shape[0], dev), lambda fr: D.band(fr, STICK_HZ, STICK_BW_OCT), sr) * D.decay(t, o, STICK_T60, 0.0002)
+        return db_to_amp(v["amp_db"]) * (y + db_to_amp(v["stick_db"]) * stick)
+
+
+BLOCK = TomDrum

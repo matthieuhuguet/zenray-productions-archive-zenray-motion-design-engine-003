@@ -1,0 +1,45 @@
+# 12 October 2026 (A4): pumped_bass, a sustained low tone (sine plus second and third harmonics) whose level is
+# ducked at every beat by a sidechain-style pump: the gain falls by depth_db at each beat and recovers exponentially
+# with release_s, beats every period_s from the phase. A single pitch, never a bass line. Derived from the
+# mathematics, no code copied. FR : basse tenue pompée à chaque temps (sidechain), une seule hauteur.
+import math
+
+import torch
+
+from zrmd.audio import sfxdsp as D
+from zrmd.audio.bank import Block, db_to_amp
+
+BEATS = 8
+META = D.meta("bass", "Pumped bass: a sustained low tone (sine, 2nd and 3rd harmonics) ducked at every beat and recovering exponentially, like a sidechain compressor.",
+              ["bass", "sub", "sidechain", "pump", "sustained", "low"], "sine with harmonics times a sum of exponential recoveries")
+
+
+class PumpedBass(Block):
+    ID = "pumped_bass"
+    FIT = {"scanPairs": [["period_s", "phase_s"]]}
+    PARAMS = [
+        D.param("f0_hz", "Hz", 25, 250, 55, "log", "fundamental"),
+        D.param("h2_db", "dB", -40, 0, -12, "lin", "second harmonic level"),
+        D.param("h3_db", "dB", -40, 0, -20, "lin", "third harmonic level"),
+        D.param("period_s", "s", 0.1, 1.0, 0.3407, "log", "time between two pumps (an eighth at 88 BPM is 0.341 s)"),
+        D.param("phase_s", "s", 0, 0.5, 0.0, "lin", "time of the first pump after the onset"),
+        D.param("depth_db", "dB", 0, 40, 12, "lin", "gain reduction at each pump"),
+        D.param("release_s", "s", 0.01, 0.5, 0.12, "log", "recovery time constant"),
+        D.param("decay_s", "s (T60)", 0.2, 20, 6, "log", "slow decay of the tone"),
+        D.AMP(-14.0), D.ONSET(0.25, 0.0),
+    ]
+
+    def synth(self, v, t, sr):
+        u = torch.clamp(t - v["onset_s"], min=0.0)
+        w = 2.0 * math.pi * v["f0_hz"] * u
+        tone = torch.sin(w) + db_to_amp(v["h2_db"]) * torch.sin(2.0 * w) + db_to_amp(v["h3_db"]) * torch.sin(3.0 * w)
+        beats = v["phase_s"] + torch.arange(BEATS, device=t.device, dtype=torch.float32) * v["period_s"]
+        dt = u[None, :] - beats[:, None]
+        # reduction in dB, the newest pump dominates: the sum of decays of each pump since it fired
+        red = (D.gate(dt, 0.0) * torch.exp(-torch.clamp(dt, min=0.0) / v["release_s"])).amax(0)
+        g = torch.pow(10.0, -v["depth_db"] * red / 20.0)
+        env = D.decay(t, v["onset_s"], v["decay_s"], 0.003)
+        return db_to_amp(v["amp_db"]) * tone * g * env
+
+
+BLOCK = PumpedBass

@@ -1,0 +1,104 @@
+{
+  "id": "supersaw",
+  "family": "subtractive",
+  "kind": "source",
+  "description": "Seven detuned polyBLEP saws (side voices level, detune spread) through a lowpass, attack and decay. Trance and EDM leads, risers, big chords. (12 October 2026)",
+  "tags": [
+    "tonal",
+    "saw",
+    "supersaw",
+    "lead",
+    "pad",
+    "subtractive"
+  ],
+  "sources": [
+    {
+      "what": "polyBLEP oscillator",
+      "url": null,
+      "reference": "V. Valimaki and A. Huovilainen, Antialiasing oscillators in subtractive synthesis, IEEE SPM 24(2), 2007",
+      "licence": "original (derived from the published mathematics, no code copied)"
+    },
+    {
+      "what": "biquad magnitude responses",
+      "url": "https://www.w3.org/TR/audio-eq-cookbook/",
+      "reference": "R. Bristow-Johnson, Audio EQ Cookbook (formulas placed in the public domain by the author)",
+      "licence": "public domain (formulas), code original"
+    }
+  ],
+  "licence": "original",
+  "params": [
+    {
+      "name": "f0_hz",
+      "unit": "Hz",
+      "min": 40.0,
+      "max": 2000.0,
+      "default": 220.0,
+      "scale": "log",
+      "description": "centre pitch"
+    },
+    {
+      "name": "detune_cents",
+      "unit": "cents",
+      "min": 1.0,
+      "max": 60.0,
+      "default": 18.0,
+      "scale": "log",
+      "description": "outer voice detune"
+    },
+    {
+      "name": "side_db",
+      "unit": "dB",
+      "min": -30.0,
+      "max": 0.0,
+      "default": -4.0,
+      "scale": "lin",
+      "description": "level of the six side voices"
+    },
+    {
+      "name": "cutoff_hz",
+      "unit": "Hz",
+      "min": 200.0,
+      "max": 16000.0,
+      "default": 4000.0,
+      "scale": "log",
+      "description": "lowpass cutoff"
+    },
+    {
+      "name": "attack_s",
+      "unit": "s",
+      "min": 0.001,
+      "max": 0.5,
+      "default": 0.02,
+      "scale": "log",
+      "description": "linear attack"
+    },
+    {
+      "name": "decay_s",
+      "unit": "s (T60)",
+      "min": 0.1,
+      "max": 6.0,
+      "default": 1.5,
+      "scale": "log",
+      "description": "time to fall 60 dB"
+    },
+    {
+      "name": "amp_db",
+      "unit": "dBFS",
+      "min": -60.0,
+      "max": 0.0,
+      "default": -12.0,
+      "scale": "lin",
+      "description": "peak level"
+    },
+    {
+      "name": "onset_s",
+      "unit": "s",
+      "min": 0.0,
+      "max": 0.25,
+      "default": 0.02,
+      "scale": "lin",
+      "description": "start time in the window"
+    }
+  ],
+  "date": "12 October 2026"
+}

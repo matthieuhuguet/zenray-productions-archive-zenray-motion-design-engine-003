@@ -1,0 +1,88 @@
+{
+  "id": "ui_blip_tri",
+  "family": "notification",
+  "kind": "source",
+  "description": "Additive triangle (odd harmonics 1/k^2) with a short pitch drop, attack and decay. UI clicks, taps, toggles, retro game blips. (12 October 2026)",
+  "tags": [
+    "tonal",
+    "triangle",
+    "blip",
+    "click",
+    "ui",
+    "retro"
+  ],
+  "sources": [
+    {
+      "what": "triangle Fourier series",
+      "url": null,
+      "licence": "original (derived from the published mathematics, no code copied)"
+    }
+  ],
+  "licence": "original",
+  "params": [
+    {
+      "name": "f0_hz",
+      "unit": "Hz",
+      "min": 100.0,
+      "max": 6000.0,
+      "default": 1200.0,
+      "scale": "log",
+      "description": "start pitch"
+    },
+    {
+      "name": "drop_st",
+      "unit": "semitones",
+      "min": -24.0,
+      "max": 12.0,
+      "default": -5.0,
+      "scale": "lin",
+      "description": "pitch change reached"
+    },
+    {
+      "name": "drop_s",
+      "unit": "s",
+      "min": 0.005,
+      "max": 0.3,
+      "default": 0.03,
+      "scale": "log",
+      "description": "pitch change time constant"
+    },
+    {
+      "name": "attack_s",
+      "unit": "s",
+      "min": 0.0005,
+      "max": 0.05,
+      "default": 0.001,
+      "scale": "log",
+      "description": "linear attack"
+    },
+    {
+      "name": "decay_s",
+      "unit": "s (T60)",
+      "min": 0.01,
+      "max": 1.0,
+      "default": 0.12,
+      "scale": "log",
+      "description": "time to fall 60 dB"
+    },
+    {
+      "name": "amp_db",
+      "unit": "dBFS",
+      "min": -60.0,
+      "max": 0.0,
+      "default": -12.0,
+      "scale": "lin",
+      "description": "peak level"
+    },
+    {
+      "name": "onset_s",
+      "unit": "s",
+      "min": 0.0,
+      "max": 0.25,
+      "default": 0.02,
+      "scale": "lin",
+      "description": "start time in the window"
+    }
+  ],
+  "date": "12 October 2026"
+}

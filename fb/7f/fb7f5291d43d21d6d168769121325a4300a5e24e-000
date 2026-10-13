@@ -1,0 +1,75 @@
+{
+  "id": "delay_echo",
+  "family": "delay",
+  "kind": "effect",
+  "description": "Feedback echo (time, feedback, per-repeat lowpass, mix), first eight repeats exact, fractional delay by phase. Echoes, slapback, dub throws. (12 October 2026)",
+  "tags": [
+    "effect",
+    "delay",
+    "echo",
+    "slapback",
+    "feedback"
+  ],
+  "sources": [
+    {
+      "what": "feedback delay as a tap sum",
+      "url": null,
+      "licence": "original (derived from the published mathematics, no code copied)"
+    },
+    {
+      "what": "biquad magnitude responses",
+      "url": "https://www.w3.org/TR/audio-eq-cookbook/",
+      "reference": "R. Bristow-Johnson, Audio EQ Cookbook (formulas placed in the public domain by the author)",
+      "licence": "public domain (formulas), code original"
+    }
+  ],
+  "licence": "original",
+  "params": [
+    {
+      "name": "time_s",
+      "unit": "s",
+      "min": 0.03,
+      "max": 0.5,
+      "default": 0.18,
+      "scale": "log",
+      "description": "echo period"
+    },
+    {
+      "name": "feedback",
+      "unit": "x",
+      "min": 0.0,
+      "max": 0.85,
+      "default": 0.45,
+      "scale": "lin",
+      "description": "level of each repeat relative to the previous"
+    },
+    {
+      "name": "damp_hz",
+      "unit": "Hz",
+      "min": 500.0,
+      "max": 16000.0,
+      "default": 4000.0,
+      "scale": "log",
+      "description": "lowpass applied at each repeat"
+    },
+    {
+      "name": "mix",
+      "unit": "0..1",
+      "min": 0.0,
+      "max": 1.0,
+      "default": 0.4,
+      "scale": "lin",
+      "description": "wet share, equal power"
+    },
+    {
+      "name": "out_db",
+      "unit": "dB",
+      "min": -24.0,
+      "max": 12.0,
+      "default": 0.0,
+      "scale": "lin",
+      "description": "output gain"
+    }
+  ],
+  "date": "12 October 2026"
+}

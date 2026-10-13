@@ -1,0 +1,10 @@
+# 12 October 2026: side-by-side board, reference over render, at given offsets (seconds into the shot).
+import sys, json
+from pathlib import Path
+import numpy as np, cv2
+ENGINE = Path(__file__).resolve().parent.parent; sys.path.insert(0, str(ENGINE))
+from zrmd.media import frame_at
+ref, start, out, png = sys.argv[1], float(sys.argv[2]), sys.argv[3], sys.argv[4]
+ts = [float(x) for x in sys.argv[5].split(",")]
+rows = [np.vstack([frame_at(ref, start + t, 480, 270), frame_at(out, t, 480, 270)]) for t in ts]
+cv2.imwrite(png, cv2.cvtColor(np.hstack(rows), cv2.COLOR_RGB2BGR))

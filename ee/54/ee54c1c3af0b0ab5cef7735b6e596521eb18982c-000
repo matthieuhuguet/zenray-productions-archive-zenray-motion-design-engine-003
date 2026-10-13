@@ -1,0 +1,33 @@
+// RunHyperframes.mjs: private, pinned wrapper around the local HyperFrames CLI (12 October 2026, 03:10 CEST).
+// FR : enveloppe privée et épinglée autour de la CLI HyperFrames locale.
+import { spawnSync } from "node:child_process";
+import { existsSync, readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
+
+const TOOLING_DIR = join(dirname(dirname(fileURLToPath(import.meta.url))), "tooling");
+const PINNED = JSON.parse(readFileSync(join(TOOLING_DIR, "package.json"), "utf8")).devDependencies.hyperframes;
+const CLI = join(TOOLING_DIR, "node_modules", ".bin", "hyperframes");
+const REFUSED = new Set(["publish", "cloud", "lambda", "cloudrun", "feedback", "auth", "figma", "capture",
+  "tts", "remove-background", "transcribe", "models", "skills", "events", "usage", "open", "catch-up"]);
+const OPENS_BROWSER = new Set(["preview", "play", "present"]);
+
+const args = process.argv.slice(2);
+if (REFUSED.has(args[0])) { console.error(`refused: "${args[0]}" leaves the machine or uses generative AI`); process.exit(2); }
+if (OPENS_BROWSER.has(args[0]) && !args.includes("--no-open")) args.push("--no-open");
+
+// Opt out of telemetry (and canaries), update checks, auto-install and third-party skills.
+// FR : sortie de la télémétrie (et des canaris), des mises à jour, de l'auto-installation et des skills tiers.
+const env = { ...process.env, HYPERFRAMES_NO_TELEMETRY: "1", DO_NOT_TRACK: "1",
+  HYPERFRAMES_NO_UPDATE_CHECK: "1", HYPERFRAMES_NO_AUTO_INSTALL: "1", HYPERFRAMES_SKIP_SKILLS: "1" };
+for (const key of ["GEMINI_API_KEY", "OPENROUTER_API_KEY", "HEYGEN_API_KEY", "HYPERFRAMES_API_KEY", "HEYGEN_ACCESS_TOKEN"]) delete env[key];
+
+const installed = spawnSync(CLI, ["--version"], { env, encoding: "utf8" }).stdout.trim();
+if (installed !== PINNED) { console.error(`version drift: installed ${installed}, pinned ${PINNED}`); process.exit(3); }
+
+const browser = spawnSync(CLI, ["browser", "path"], { env, encoding: "utf8" }).stdout.trim();
+if (!browser.includes("chrome-headless-shell") || !existsSync(browser)) { console.error("managed chrome-headless-shell missing"); process.exit(4); }
+env.HYPERFRAMES_BROWSER_PATH = browser; // Never fall back to the personal Chrome app.
+
+const run = spawnSync(CLI, args, { env, stdio: "inherit" });
+process.exit(run.status ?? 1);

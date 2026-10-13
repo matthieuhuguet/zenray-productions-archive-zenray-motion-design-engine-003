@@ -1,0 +1,35 @@
+# 12 October 2026: room_tone, stationary noise with a spectral tilt (dB per octave), a high-pass and a low-pass, plus a
+# mains hum (fundamental and 3 harmonics at 1/k), faded in: air, room tone, ventilation. Derived from the mathematics.
+# FR : ambiance de pièce, bruit incliné et ronflement secteur.
+import math
+
+import torch
+
+from zrmd.audio import sfxdsp as D
+from zrmd.audio.bank import Block, db_to_amp
+
+HUM_HARMONICS = 4
+META = D.meta("ambience", "Room tone: stationary tilted noise between a high-pass and a low-pass, plus a mains hum, faded in.", ["ambience", "room tone", "air", "hum", "background", "noise"], "spectrally shaped noise and harmonic hum")
+
+
+class RoomTone(Block):
+    ID = "room_tone"
+    PARAMS = [
+        D.param("tilt_db_oct", "dB/octave", -9.0, 3.0, -3.0, "lin", "spectral slope (-3 is pink)"),
+        D.param("hp_hz", "Hz", 20, 400, 60, "log", "high-pass cutoff"),
+        D.param("lp_hz", "Hz", 1500, 20000, 8000, "log", "low-pass cutoff"),
+        D.param("hum_hz", "Hz", 45, 130, 50, "log", "hum fundamental"),
+        D.param("hum_db", "dB re noise", -60, 0, -24, "lin", "hum level"),
+        D.param("fade_s", "s", 0.002, 0.4, 0.05, "log", "fade-in length"),
+        D.AMP(-24.0),
+    ]
+
+    def synth(self, v, t, sr):
+        n = D.filtered(self.noise(t.shape[0], t.device), lambda fr: D.tilt(fr, v["tilt_db_oct"]) * D.highpass(fr, v["hp_hz"], 12.0) * D.lowpass(fr, v["lp_hz"], 12.0), sr)
+        k = torch.arange(1, HUM_HARMONICS + 1, device=t.device, dtype=torch.float32)
+        hum = (torch.sin(2.0 * math.pi * v["hum_hz"] * k[:, None] * t[None, :]) / k[:, None]).sum(0)
+        hum = hum / torch.sqrt(torch.mean(hum * hum) + 1e-12)
+        return db_to_amp(v["amp_db"]) * torch.clamp(t / v["fade_s"], 0.0, 1.0) * (n + db_to_amp(v["hum_db"]) * hum)
+
+
+BLOCK = RoomTone

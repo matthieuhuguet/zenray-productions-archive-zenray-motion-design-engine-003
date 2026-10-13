@@ -1,0 +1,30 @@
+# 12 October 2026: hihat_open, the same metallic source as hihat_closed (sfxdsp.metal_hat) with a long decay and a
+# choke (cut with a 4 ms release at choke_s). Derived from the mathematics. FR : charleston ouvert étouffé.
+import torch
+
+from zrmd.audio import sfxdsp as D
+from zrmd.audio.bank import Block, db_to_amp
+
+CHOKE_RELEASE_S = 0.004
+META = D.meta("cymbal", "Open hi-hat: metallic partials and noise, high-passed, long decay cut by a choke.", ["hat", "hihat", "open", "cymbal", "metallic"], "inharmonic partials (TR-808 ratios), filtered noise, choke gate")
+
+
+class HihatOpen(Block):
+    ID = "hihat_open"
+    PARAMS = [
+        D.param("base_hz", "Hz", 1500, 9000, 3500, "log", "lowest metallic partial"),
+        D.param("metal_db", "dB re noise", -40, 6, -6, "lin", "metallic partials level"),
+        D.param("hp_hz", "Hz", 2000, 12000, 5000, "log", "high-pass cutoff"),
+        D.param("decay_s", "s (T60)", 0.15, 2.5, 0.8, "log", "time to fall 60 dB"),
+        D.param("choke_s", "s", 0.08, 0.75, 0.4, "lin", "time after onset when the hat is choked"),
+        D.AMP(-16.0), D.ONSET(),
+    ]
+
+    def synth(self, v, t, sr):
+        o = v["onset_s"]
+        src = D.metal_hat(t, self.noise(t.shape[0], t.device), sr, v["base_hz"], v["metal_db"], v["hp_hz"])
+        choke = torch.sigmoid((o + v["choke_s"] - t) / CHOKE_RELEASE_S)
+        return db_to_amp(v["amp_db"]) * src * D.decay(t, o, v["decay_s"], 0.0005) * choke
+
+
+BLOCK = HihatOpen

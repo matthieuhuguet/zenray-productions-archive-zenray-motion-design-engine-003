@@ -1,0 +1,113 @@
+{
+  "id": "pulse_lead",
+  "family": "subtractive",
+  "kind": "source",
+  "description": "polyBLEP pulse wave with duty cycle, sine vibrato and lowpass. Chiptune and retro leads, 8-bit UI tones. (12 October 2026)",
+  "tags": [
+    "tonal",
+    "pulse",
+    "square",
+    "chiptune",
+    "lead",
+    "vibrato"
+  ],
+  "sources": [
+    {
+      "what": "polyBLEP oscillator",
+      "url": null,
+      "reference": "Valimaki and Huovilainen 2007",
+      "licence": "original (derived from the published mathematics, no code copied)"
+    },
+    {
+      "what": "biquad magnitude responses",
+      "url": "https://www.w3.org/TR/audio-eq-cookbook/",
+      "reference": "R. Bristow-Johnson, Audio EQ Cookbook (formulas placed in the public domain by the author)",
+      "licence": "public domain (formulas), code original"
+    }
+  ],
+  "licence": "original",
+  "params": [
+    {
+      "name": "f0_hz",
+      "unit": "Hz",
+      "min": 60.0,
+      "max": 2000.0,
+      "default": 330.0,
+      "scale": "log",
+      "description": "pitch"
+    },
+    {
+      "name": "width",
+      "unit": "duty",
+      "min": 0.05,
+      "max": 0.5,
+      "default": 0.3,
+      "scale": "lin",
+      "description": "pulse duty cycle (0.5 square)"
+    },
+    {
+      "name": "cutoff_hz",
+      "unit": "Hz",
+      "min": 200.0,
+      "max": 16000.0,
+      "default": 3000.0,
+      "scale": "log",
+      "description": "lowpass cutoff"
+    },
+    {
+      "name": "vib_rate_hz",
+      "unit": "Hz",
+      "min": 0.5,
+      "max": 9.0,
+      "default": 5.5,
+      "scale": "lin",
+      "description": "vibrato rate"
+    },
+    {
+      "name": "vib_cents",
+      "unit": "cents",
+      "min": 0.0,
+      "max": 80.0,
+      "default": 15.0,
+      "scale": "lin",
+      "description": "vibrato depth"
+    },
+    {
+      "name": "attack_s",
+      "unit": "s",
+      "min": 0.001,
+      "max": 0.3,
+      "default": 0.01,
+      "scale": "log",
+      "description": "linear attack"
+    },
+    {
+      "name": "decay_s",
+      "unit": "s (T60)",
+      "min": 0.1,
+      "max": 6.0,
+      "default": 1.0,
+      "scale": "log",
+      "description": "time to fall 60 dB"
+    },
+    {
+      "name": "amp_db",
+      "unit": "dBFS",
+      "min": -60.0,
+      "max": 0.0,
+      "default": -12.0,
+      "scale": "lin",
+      "description": "peak level"
+    },
+    {
+      "name": "onset_s",
+      "unit": "s",
+      "min": 0.0,
+      "max": 0.25,
+      "default": 0.02,
+      "scale": "lin",
+      "description": "start time in the window"
+    }
+  ],
+  "date": "12 October 2026"
+}

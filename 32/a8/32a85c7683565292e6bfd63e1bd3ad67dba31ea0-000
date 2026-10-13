@@ -1,0 +1,33 @@
+# 13 October 2026: runs every tests/test_*.py as its own process (each is a script with a __main__) and prints one line
+# per test with its exit code and duration; exit code 1 when any fails. Usage: python -I Scripts/RunTests.py [name ...] [--json]
+# FR : lance chaque test dans son processus et resume ; code 1 si l'un echoue.
+import json
+import subprocess
+import sys
+import time
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parent.parent
+
+
+def main() -> int:
+    names = [a for a in sys.argv[1:] if not a.startswith("--")]
+    files = sorted((ROOT / "tests").glob("test_*.py"))
+    if names:
+        files = [f for f in files if any(n in f.stem for n in names)]
+    rows = []
+    for f in files:
+        t0 = time.time()
+        r = subprocess.run([sys.executable, "-I", str(f)], capture_output=True, text=True, cwd=ROOT)
+        tail = (r.stdout.strip().splitlines() or r.stderr.strip().splitlines() or [""])[-1][:100]
+        rows.append({"test": f.stem, "exit": r.returncode, "seconds": round(time.time() - t0, 1), "last": tail})
+    if "--json" in sys.argv:
+        print(json.dumps(rows, indent=1))
+    else:
+        for r in rows:
+            print(f"{'OK  ' if r['exit'] == 0 else 'FAIL'} {r['test']:<28} {r['seconds']:>6.1f}s  {r['last']}")
+    return 1 if any(r["exit"] for r in rows) else 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

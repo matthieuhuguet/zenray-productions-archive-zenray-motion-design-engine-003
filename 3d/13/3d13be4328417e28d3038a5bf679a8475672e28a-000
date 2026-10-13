@@ -1,0 +1,116 @@
+{
+  "id": "modal_pop",
+  "family": "modal",
+  "description": "Modal pop: eight inharmonic modes (stretch exponent) with per-mode decay, a body pitch drop and a noise click. (12 October 2026)",
+  "tags": [
+    "tonal",
+    "modal",
+    "pop",
+    "bubble",
+    "ding",
+    "drop",
+    "inharmonic",
+    "ui"
+  ],
+  "sources": [
+    {
+      "what": "phase-accumulated decaying modes f0 * k^stretch with a pitch drop",
+      "url": null,
+      "licence": "original (derived from the mathematics, no code copied)"
+    }
+  ],
+  "licence": "original",
+  "params": [
+    {
+      "name": "f0_hz",
+      "unit": "Hz",
+      "min": 60.0,
+      "max": 5000.0,
+      "default": 700.0,
+      "scale": "log",
+      "description": "lowest mode after the drop"
+    },
+    {
+      "name": "stretch",
+      "unit": "exponent",
+      "min": 0.5,
+      "max": 2.2,
+      "default": 1.0,
+      "scale": "lin",
+      "description": "mode k sits at f0 * k^stretch"
+    },
+    {
+      "name": "tilt_db_oct",
+      "unit": "dB/octave",
+      "min": -30.0,
+      "max": 6.0,
+      "default": -12.0,
+      "scale": "lin",
+      "description": "level of mode k relative to mode 1 per octave of k"
+    },
+    {
+      "name": "decay_s",
+      "unit": "s (T60)",
+      "min": 0.02,
+      "max": 3.0,
+      "default": 0.3,
+      "scale": "log",
+      "description": "decay of the lowest mode"
+    },
+    {
+      "name": "damp",
+      "unit": "exponent",
+      "min": 0.0,
+      "max": 2.5,
+      "default": 1.0,
+      "scale": "lin",
+      "description": "mode decay decay_s / k^damp"
+    },
+    {
+      "name": "drop_st",
+      "unit": "semitones",
+      "min": 0.0,
+      "max": 24.0,
+      "default": 5.0,
+      "scale": "lin",
+      "description": "start pitch above the final pitch"
+    },
+    {
+      "name": "drop_ms",
+      "unit": "ms",
+      "min": 1.0,
+      "max": 200.0,
+      "default": 20.0,
+      "scale": "log",
+      "description": "time constant of the pitch drop"
+    },
+    {
+      "name": "click_db",
+      "unit": "dB",
+      "min": -60.0,
+      "max": 0.0,
+      "default": -24.0,
+      "scale": "lin",
+      "description": "level of the 3 ms noise click, relative"
+    },
+    {
+      "name": "amp_db",
+      "unit": "dBFS",
+      "min": -60.0,
+      "max": 0.0,
+      "default": -14.0,
+      "scale": "lin",
+      "description": "peak level of the main layer"
+    },
+    {
+      "name": "onset_s",
+      "unit": "s",
+      "min": 0.0,
+      "max": 0.25,
+      "default": 0.02,
+      "scale": "lin",
+      "description": "start time in the window"
+    }
+  ],
+  "date": "12 October 2026"
+}

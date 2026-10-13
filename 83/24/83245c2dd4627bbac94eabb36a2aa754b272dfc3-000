@@ -1,0 +1,95 @@
+{
+  "id": "shaker",
+  "family": "foley",
+  "description": "Shaker: soft high-passed noise grains in a swung pattern, alternating strong and weak strokes. (12 October 2026)",
+  "tags": [
+    "foley",
+    "shaker",
+    "percussion",
+    "pattern",
+    "noise"
+  ],
+  "sources": [
+    {
+      "what": "deterministic stroke pattern of filtered noise",
+      "url": null,
+      "licence": "original (derived from the mathematics, no code copied)"
+    }
+  ],
+  "licence": "original",
+  "params": [
+    {
+      "name": "count",
+      "unit": "strokes",
+      "min": 1.0,
+      "max": 16.0,
+      "default": 8.0,
+      "scale": "lin",
+      "description": "number of strokes (continuous)"
+    },
+    {
+      "name": "rate_hz",
+      "unit": "strokes/s",
+      "min": 4.0,
+      "max": 20.0,
+      "default": 10.0,
+      "scale": "log",
+      "description": "stroke rate"
+    },
+    {
+      "name": "swing",
+      "unit": "x period",
+      "min": 0.0,
+      "max": 0.4,
+      "default": 0.15,
+      "scale": "lin",
+      "description": "delay of every other stroke"
+    },
+    {
+      "name": "hp_hz",
+      "unit": "Hz",
+      "min": 2000.0,
+      "max": 12000.0,
+      "default": 5000.0,
+      "scale": "log",
+      "description": "high-pass cutoff"
+    },
+    {
+      "name": "attack_s",
+      "unit": "s",
+      "min": 0.002,
+      "max": 0.04,
+      "default": 0.01,
+      "scale": "log",
+      "description": "attack of each grain (its peak stays at stroke time + 0.04 s)"
+    },
+    {
+      "name": "decay_s",
+      "unit": "s (T60)",
+      "min": 0.01,
+      "max": 0.15,
+      "default": 0.05,
+      "scale": "log",
+      "description": "decay of each grain"
+    },
+    {
+      "name": "amp_db",
+      "unit": "dBFS",
+      "min": -60.0,
+      "max": 0.0,
+      "default": -14.0,
+      "scale": "lin",
+      "description": "peak level of the main layer"
+    },
+    {
+      "name": "onset_s",
+      "unit": "s",
+      "min": 0.0,
+      "max": 0.2,
+      "default": 0.02,
+      "scale": "lin",
+      "description": "start time in the window"
+    }
+  ],
+  "date": "12 October 2026"
+}

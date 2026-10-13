@@ -1,0 +1,52 @@
+{
+  "id": "stereo_width",
+  "family": "stereo",
+  "kind": "effect",
+  "stereo": true,
+  "description": "Mid/side widener with a Haas-delayed side (width, Haas delay in ms). Stereo block: mono view is the left channel. Wide pads, spacious UI sounds. (12 October 2026)",
+  "tags": [
+    "effect",
+    "stereo",
+    "width",
+    "haas",
+    "mid-side"
+  ],
+  "sources": [
+    {
+      "what": "mid/side matrix and precedence (Haas) effect",
+      "url": null,
+      "licence": "original (derived from the published mathematics, no code copied)"
+    }
+  ],
+  "licence": "original",
+  "params": [
+    {
+      "name": "width",
+      "unit": "x",
+      "min": 0.0,
+      "max": 2.0,
+      "default": 1.2,
+      "scale": "lin",
+      "description": "side level"
+    },
+    {
+      "name": "haas_ms",
+      "unit": "ms",
+      "min": 1.0,
+      "max": 30.0,
+      "default": 12.0,
+      "scale": "log",
+      "description": "delay of the side copy"
+    },
+    {
+      "name": "out_db",
+      "unit": "dB",
+      "min": -24.0,
+      "max": 12.0,
+      "default": 0.0,
+      "scale": "lin",
+      "description": "output gain"
+    }
+  ],
+  "date": "12 October 2026"
+}

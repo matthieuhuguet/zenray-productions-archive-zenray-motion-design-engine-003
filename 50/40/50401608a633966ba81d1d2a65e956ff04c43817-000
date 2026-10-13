@@ -1,0 +1,52 @@
+# 12 October 2026: notify_arpeggio, three rising notes (step1_st then step2_st semitones), step_s apart, each a
+# four-partial harmonic tone of tilt `brightness`, with one decay. Success jingles, level ups. FR : arpège de trois
+# notes.
+import math
+
+import torch
+
+from zrmd.audio.bank import Block, db_to_amp, envelope, stft_filter
+from zrmd.audio import fxdsp as F
+from zrmd.audio.fxdsp import param as P
+
+META = {"family": "notification", "kind": "source",
+        "description": "Three-note arpeggio (two intervals in semitones, step time), four-partial harmonic notes with tilt. Success jingles, level up, confirmations. (12 October 2026)",
+        "tags": ["tonal", "notification", "arpeggio", "success", "jingle", "ui"],
+        "sources": [{"what": "additive notes", "url": None, "licence": F.SOURCE}],
+        "licence": "original"}
+
+
+class NotifyArpeggio(Block):
+    ID = "notify_arpeggio"
+    # 12 October 2026 (A2): fit hints measured on the failed cases of the first A2 verification (docs/build/
+    # A2-tonal-effects.md): a larger search budget (second pass: finer scans, which a pitch basin of
+    # about 0.07 semitone at the third partial needs, and a larger evolution strategy), and coupled groups for the evolution strategy. FR : indications.
+    FIT = {"scanRounds": 6, "polishRounds": 12, "starts": 12, "screenSamples": 1024, "screenBlurMs": 10.0, "blurStartMs": 15.0, "blurEndMs": 1.0, "scanPoints": 129, "scanZoomPoints": 65,
+           "scanGroups": [["onset_s", "step_s"], ["f1_hz", "step1_st", "step2_st"], "*"]}
+    PARAMS = [
+        P("f1_hz", "Hz", 150, 3000, 523, "log", "first note"),
+        P("step1_st", "semitones", 0.0, 12.0, 4.0, "lin", "second note above the first"),
+        P("step2_st", "semitones", 0.0, 12.0, 3.0, "lin", "third note above the second"),
+        P("step_s", "s", 0.03, 0.3, 0.09, "log", "time between notes"),
+        P("note_decay_s", "s (T60)", 0.05, 2.0, 0.35, "log", "decay of each note"),
+        P("tilt", "exponent", 0.5, 4.0, 2.0, "lin", "partial k gain k**-tilt"),
+        P("amp_db", "dBFS", -60, 0, -12, "lin", "peak level"),
+        P("onset_s", "s", 0.0, 0.25, 0.02, "lin", "start time in the window"),
+    ]
+
+    def synth(self, v, t, sr):
+        gains = [float(k) ** (-v["tilt"]) for k in range(1, 5)]
+        norm = sum(gains)
+        fs = [v["f1_hz"], v["f1_hz"] * torch.pow(2.0, v["step1_st"] / 12.0),
+              v["f1_hz"] * torch.pow(2.0, (v["step1_st"] + v["step2_st"]) / 12.0)]
+        y = torch.zeros_like(t)
+        for i, f in enumerate(fs):
+            on = v["onset_s"] + i * v["step_s"]
+            e = envelope(t, on, torch.tensor(0.002), v["note_decay_s"])
+            # 12 October 2026 (A2 resume): phase locked to each note onset, which decouples pitch from onset and step.
+            # FR : phase calée sur l'attaque de chaque note.
+            y = y + e * sum(g * F.nyquist_mask(k * f, sr) * torch.sin(F.TWO_PI * k * f * (t - on)) for k, g in zip(range(1, 5), gains)) / norm
+        return F.amp(v) * y
+
+
+BLOCK = NotifyArpeggio

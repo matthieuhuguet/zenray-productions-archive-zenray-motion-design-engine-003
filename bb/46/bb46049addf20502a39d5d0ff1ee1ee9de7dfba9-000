@@ -1,0 +1,144 @@
+# 12 October 2026, 15:00 CEST: device screen look fitted with arch_stack_grid (nested arches, variable projection).
+# Derived from Scripts/FitDeviceScreenGrid.py; starts come from the measured light contours of each frame (measure_starts).
+# Nonlinear search only on the shape (cx, apex, k, p, t1, droplet y and radius); for each shape the 32 grid colours are
+# the exact weighted least-squares solution (the image is linear in them). Screen-masked residual, crop 128 x 200, tilt
+# sign corrected (the device3d track stores rz already in screen convention, the crop must rotate by +rz).
+# Output: per frame the composition (arch_ramp_grid + dark droplet) as editable parameters, numpy and GLSL RMS, board.
+# Usage: python -I Scripts/FitDeviceScreenGrid.py <device3d version dir> [frames|all] [out dir] [WxH]
+from __future__ import annotations
+
+import glob, importlib.util, json, sys
+from concurrent.futures import ProcessPoolExecutor
+from pathlib import Path
+
+import numpy as np
+from scipy.optimize import least_squares
+
+ENGINE = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ENGINE))
+from zrmd.shaders import bank, compose  # noqa: E402
+
+_tw = bank.load("arch_stack_grid")
+NAMES = _tw["twin"].__globals__["NAMES"]
+BASIS = _tw["twin"].__globals__["basis"]
+# 12 October 2026: shape vector (name, lo, hi); starts below.
+SHAPE = [("cx", 0.42, 0.58)] + [(f"{n}{l}", lo, hi) for l in range(3) for n, lo, hi in (("apex", 0.0, 1.2), ("k", 0.0, 3.0), ("p", 0.4, 5.0))] + [("dot_y", 0.15, 0.75), ("dot_r", 0.0, 0.06)]
+LO = np.array([s[1] for s in SHAPE]); HI = np.array([s[2] for s in SHAPE])
+STARTS = [[0.5, 0.55, 0.49, 1.44, 0.49, 0.25, 1.6, 0.43, 0.08, 1.7, 0.47, 0.02]]
+DOT = np.array([0.06, 0.06, 0.06])
+
+
+def uvgrid(w, h):
+    return np.meshgrid((np.arange(w) + 0.5) / w, (np.arange(h) + 0.5) / h)
+
+
+def measure_starts(img):
+    """12 October 2026: inner and outer light contours (luminance 40) fitted as power arches give the starting stack."""
+    from scipy.optimize import curve_fit
+    L = img.mean(2); H, W = L.shape; x = np.linspace(-1, 1, W)
+    inner, outer, xs = [], [], []
+    for c in range(W // 16, W - W // 16):
+        br = np.where(L[:, c] > 40)[0]
+        if len(br) >= 2:
+            inner.append(br.max() / H); outer.append(br.min() / H); xs.append(x[c])
+    g = lambda X, a, k, p: a + k * np.abs(X) ** p
+    try:
+        pi, _ = curve_fit(g, xs, inner, p0=[0.5, 0.4, 1.5], bounds=([0, 0, 0.5], [1.2, 3, 5]))
+        po, _ = curve_fit(g, xs, outer, p0=[0.4, 0.1, 1.7], bounds=([0, 0, 0.5], [1.2, 3, 5]))
+    except Exception:
+        return []
+    pm = (pi + po) / 2
+    return [[0.5, *pi, *pm, *po, max(0.16, po[0] + 0.04), 0.02]]
+
+
+def design(x, aspect, w, h):
+    s = dict(zip([n for n, *_ in SHAPE], x))
+    u, v = uvgrid(w, h)
+    q = {k_: s[k_] for k_ in ("cx", "apex0", "k0", "p0", "apex1", "k1", "p1", "apex2", "k2", "p2")}
+    B = BASIS(q, u, v)
+    r = np.sqrt(((u - s["cx"]) * aspect) ** 2 + (v - s["dot_y"]) ** 2)
+    m = np.clip((s["dot_r"] - r) / 0.004 + 0.5, 0, 1) if s["dot_r"] > 1e-4 else np.zeros_like(u)
+    return q, s, B, m
+
+
+def solve(x, target, wts, aspect):
+    h, w = target.shape[:2]
+    q, s, B, m = design(x, aspect, w, h)
+    A = (B * (1 - m)[..., None]).reshape(-1, B.shape[-1])
+    y = (target / 255.0 - (m[..., None] * DOT)).reshape(-1, 3)
+    sw = np.sqrt(wts.reshape(-1))[:, None]
+    C, *_ = np.linalg.lstsq(A * sw, y * sw, rcond=None)
+    C = np.clip(C, 0, 1)
+    img = (A @ C).reshape(h, w, 3) + m[..., None] * DOT
+    return C, img * 255.0, q, s
+
+
+def wrms(a, b, w):
+    d = (np.asarray(a, float) - np.asarray(b, float)) ** 2
+    return float(np.sqrt((d * w[..., None]).sum() / (w.sum() * 3)))
+
+
+def _fit(args):
+    x0, target, wts, aspect, nfev = args
+    x0 = np.clip(x0, LO + 1e-6, HI - 1e-6)
+    f = lambda x: ((solve(x, target, wts, aspect)[1] - target) / 255.0 * np.sqrt(wts)[..., None]).ravel()
+    r = least_squares(f, x0, bounds=(LO, HI), max_nfev=nfev, x_scale="jac", diff_step=1e-3)
+    return r.x, wrms(solve(r.x, target, wts, aspect)[1], target, wts)
+
+
+def composition(x, target, wts, aspect):
+    C, _, q, s = solve(x, target, wts, aspect)
+    p = dict(q); p.update({n: [round(float(c), 5) for c in C[i]] for i, n in enumerate(NAMES)})
+    L = [{"block": "arch_stack_grid", "params": p}]
+    if s["dot_r"] > 1e-4:
+        L.append({"block": "solid_color", "params": {"color": DOT.tolist()},
+                  "mask": {"block": "sdf_circle", "params": {"center": [s["cx"], s["dot_y"]], "radius": s["dot_r"], "soft": 0.002, "aspect": aspect}}})
+    return L
+
+
+def main() -> int:
+    vdir = Path(sys.argv[1]); sel_arg = sys.argv[2] if len(sys.argv) > 2 else "10,48,92"
+    out = Path(sys.argv[3]) if len(sys.argv) > 3 else vdir / "screen-stack-fit"
+    cw, ch = (int(v) for v in (sys.argv[4] if len(sys.argv) > 4 else "128x200").split("x"))
+    out.mkdir(parents=True, exist_ok=True)
+    spec = importlib.util.spec_from_file_location("fag", ENGINE / "Scripts" / "FitArchGlow.py")
+    fag = importlib.util.module_from_spec(spec); spec.loader.exec_module(fag)
+    _ms = importlib.util.spec_from_file_location("fds", ENGINE / "Scripts" / "FitDeviceScreen.py")
+    fds = importlib.util.module_from_spec(_ms); _ms.loader.exec_module(fds)
+    prm = json.loads((vdir / "params.json").read_text())["device3d"]; dev = prm["device"]
+    track = [dict(t, rz=-t["rz"]) for t in prm["track"]]  # 12 October 2026: crop rotates by +rz (see header)
+    video = glob.glob("/Users/zenray/.claude/tmp/tmp-zenray-motion-design-refcache/onekey-pro-2/*.mp4")[0]
+    fam = json.loads((ENGINE / "params" / "device3d.json").read_text())["frame_rule"]
+    start = json.loads((vdir.parent / "motion.json").read_text())["source"]["start"]
+    crops = fag.crops(video, start, len(track) / 60, track, dev["aspect"], dev["bezel"], fam["text_kernel"], size=(cw, ch))
+    sel = list(range(len(crops))) if sel_arg == "all" else [int(s) for s in sel_arg.split(",")]
+    aspect = 1.0 / ((dev["aspect"] - 2 * dev["bezel"]) / (1 - 2 * dev["bezel"]))
+    wts = fds.screen_mask(aspect, (dev["radius"] - dev["bezel"]) / (1 - 2 * dev["bezel"]), cw, ch)
+    res, comps, prev = [], [], None
+    with ProcessPoolExecutor(max_workers=12) as pool:
+        for i in sel:
+            tgt = crops[i].astype(float)
+            # 12 October 2026: warm start only in sequential runs ("all"), always with the grid of starts as fallback.
+            starts = measure_starts(tgt) + STARTS + ([list(prev)] if prev is not None and sel_arg == "all" else [])
+            tries = list(pool.map(_fit, [(np.array(s0, float), tgt, wts, aspect, 200) for s0 in starts]))
+            x, r = min(tries, key=lambda t: t[1])
+            prev = x  # 12 October 2026: temporal warm start, frame to frame continuity
+            comps.append(composition(x, tgt, wts, aspect))
+            res.append({"frame": i, "t_s": round(start + i / 60, 3), "wrms": round(r, 2), "shape": dict(zip([n for n, *_ in SHAPE], map(float, x)))})
+            print(i, "masked rms", round(r, 2), flush=True)
+    show = [k for k in range(len(sel)) if len(sel) <= 6 or k % max(1, len(sel) // 6) == 0][:6]
+    glsl = bank.render_glsl_batch([comps[k] for k in show], cw, ch)
+    from PIL import Image
+    rows = []
+    for k, g in zip(show, glsl):
+        res[k]["wrms_glsl"] = round(wrms(g, crops[sel[k]], wts), 2)
+        big = lambda a: np.asarray(Image.fromarray(np.asarray(a, np.uint8)).resize((cw * 2, ch * 2), Image.NEAREST))
+        rows.append(np.vstack([big(crops[sel[k]]), big(g)]))
+    Image.fromarray(np.hstack(rows)).save(out / "board.png")
+    (out / "fit.json").write_text(json.dumps({"date": "12 October 2026", "crop": [cw, ch], "frames": res, "compositions": comps}) + "\n")
+    print("median masked rms", round(float(np.median([r["wrms"] for r in res])), 2), "glsl", [res[k].get("wrms_glsl") for k in show])
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

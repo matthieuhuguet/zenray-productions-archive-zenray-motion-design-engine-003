@@ -1,0 +1,45 @@
+# 12 October 2026: fit the procedural arch-glow field to the reference screen, frame by frame.
+# Crop: the screen inside the measured device track (from a device3d version's params.json), warped at native
+# resolution, small bright marks removed by a grey opening. Writes archglow.json next to the params and a board.
+import sys, json, glob
+from pathlib import Path
+import numpy as np, cv2
+ENGINE = Path(__file__).resolve().parent.parent; sys.path.insert(0, str(ENGINE))
+from zrmd.media import read_frames
+from zrmd.shaders import archglow as ag
+
+
+def crops(video, start, dur, track, aspect, bezel, kernel, size=(64, 100)):
+    frames = read_frames(video, 1920, 1080, start=start, duration=dur)
+    out = []
+    for f, t in zip(frames, track):
+        sw, sh = t["w"] * (1 - 2 * bezel), t["w"] * (aspect - 2 * bezel)
+        k = max(3, int(round(kernel * sw)) | 1)
+        clean = cv2.morphologyEx(f, cv2.MORPH_OPEN, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (k, k)))
+        M = cv2.getRotationMatrix2D((t["cx"], t["cy"]), -t["rz"], 1.0)
+        rot = cv2.warpAffine(clean, M, (1920, 1080), flags=cv2.INTER_LINEAR, borderMode=cv2.BORDER_REPLICATE)
+        src = np.float32([[t["cx"] - sw / 2, t["cy"] - sh / 2], [t["cx"] + sw / 2, t["cy"] - sh / 2], [t["cx"] - sw / 2, t["cy"] + sh / 2]])
+        dst = np.float32([[0, 0], [size[0], 0], [0, size[1]]])
+        out.append(cv2.warpAffine(rot, cv2.getAffineTransform(src, dst), size, flags=cv2.INTER_AREA, borderMode=cv2.BORDER_REPLICATE))
+    return out
+
+
+if __name__ == "__main__":
+    vdir = Path(sys.argv[1]); frames_sel = sys.argv[2] if len(sys.argv) > 2 else "all"
+    prm = json.loads((vdir / "params.json").read_text())["device3d"]
+    video = glob.glob("/Users/zenray/.claude/tmp/tmp-zenray-motion-design-refcache/onekey-pro-2/*.mp4")[0]
+    fam = json.loads((ENGINE / "params" / "device3d.json").read_text())["frame_rule"]
+    start = json.loads((vdir.parent / "motion.json").read_text())["source"]["start"]
+    T = prm["track"]
+    cs = crops(video, start, len(T) / 60, T, prm["device"]["aspect"], prm["device"]["bezel"], fam["text_kernel"])
+    idx = range(len(cs)) if frames_sel == "all" else [int(x) for x in frames_sel.split(",")]
+    sa = (prm["device"]["aspect"] - 2 * prm["device"]["bezel"]) / (1 - 2 * prm["device"]["bezel"])
+    res, P, rows = [], None, []
+    for i in idx:
+        P, rms = ag.fit(cs[i], sa / 2, P)
+        res.append({"frame": i, "rms": round(rms, 2), **P})
+        u, v = ag.grid(*cs[i].shape[:2])
+        rows.append(np.hstack([cs[i], ag.field(P, u, v, sa / 2).astype(np.uint8)]))
+        print(i, round(rms, 2), {k: round(P[k], 3) for k in ag.NAMES})
+    (vdir / "archglow.json").write_text(json.dumps(res) + "\n")
+    board = np.hstack(rows[:8]); cv2.imwrite(str(vdir / "archglow-board.png"), cv2.cvtColor(cv2.resize(board, None, fx=2, fy=2, interpolation=cv2.INTER_NEAREST), cv2.COLOR_RGB2BGR))

@@ -1,0 +1,27 @@
+# 12 October 2026: hihat_closed, six inharmonic square-like partials (TR-808 oscillator ratios scaled to base_hz) mixed
+# with noise, high-passed, short decay. Derived from the mathematics. FR : charleston fermé.
+from zrmd.audio import sfxdsp as D
+from zrmd.audio.bank import Block, db_to_amp
+
+META = D.meta("cymbal", "Closed hi-hat: six inharmonic square-like partials mixed with noise, high-passed, short decay.", ["hat", "hihat", "closed", "cymbal", "metallic", "transient"], "inharmonic partials (TR-808 ratios) and filtered noise")
+
+
+class HihatClosed(Block):
+    ID = "hihat_closed"
+    # 12 October 2026 (A1): coupled parameters scanned jointly by dfit (see dfit scanPairs).
+    FIT = {"scanPairs": [["base_hz", "metal_db"]]}
+    PARAMS = [
+        D.param("base_hz", "Hz", 1500, 9000, 3500, "log", "lowest metallic partial"),
+        D.param("metal_db", "dB re noise", -40, 6, -6, "lin", "metallic partials level"),
+        D.param("hp_hz", "Hz", 2000, 12000, 6000, "log", "high-pass cutoff"),
+        D.param("decay_s", "s (T60)", 0.01, 0.3, 0.06, "log", "time to fall 60 dB"),
+        D.param("attack_s", "s", 0.0002, 0.005, 0.0005, "log", "linear attack"),
+        D.AMP(-14.0), D.ONSET(),
+    ]
+
+    def synth(self, v, t, sr):
+        src = D.metal_hat(t, self.noise(t.shape[0], t.device), sr, v["base_hz"], v["metal_db"], v["hp_hz"])
+        return db_to_amp(v["amp_db"]) * src * D.decay(t, v["onset_s"], v["decay_s"], v["attack_s"])
+
+
+BLOCK = HihatClosed

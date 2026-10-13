@@ -1,0 +1,6 @@
+# 12 October 2026: pinned dependencies of the F0 vector harness (zrmd.vector). Install into ~/.venvs/zenray-motion:
+#   ~/.venvs/zenray-motion/bin/python -I -m pip install -r requirements-vector.txt
+# skia-python BSD-3-Clause, uharfbuzz Apache-2.0 (HarfBuzz itself Old MIT), resvg-py MIT. Used as libraries, never vendored.
+skia-python==144.0.post2
+uharfbuzz==0.56.3
+resvg-py==0.5.0

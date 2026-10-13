@@ -1,0 +1,141 @@
+# 12 October 2026 (S4): fitting proof of the arch glow look composed from the shader bank, on the device screen of the
+# onekey-pro-2 shot 1.333 to 2.9 s. Same screen crop method as Scripts/FitArchGlow.py (measured device track of a
+# device3d version, grey opening to remove small marks, affine warp to a 64 x 100 crop). The look is the composition
+#   L0 arch_glow_field (normal)                      the arch, its ramp and side tint
+#   L1 solid_color masked by sdf_circle (normal)     the dark droplet above the apex
+#   L2 glow_ring (add)                               the light ring of the droplet
+# fitted on the numpy twins (compose.evaluate) by multi-start least squares, then rendered by the GLSL (compose.emit_glsl
+# through bank.render_glsl_batch) at the crop size and at 640 x 1000 to prove the result is code, sharp at any size.
+# The crops are analysis data only: they stay local in the output folder and are never used as a texture.
+# Usage: python -I Scripts/FitArchGlowBank.py <device3d version dir> [frames, default 10,48,92] [out dir]
+# FR : preuve d'ajustement du look arche, composé depuis la banque de shaders, RMS par image, rendu GLSL net.
+from __future__ import annotations
+
+import glob
+import importlib.util
+import json
+import sys
+from concurrent.futures import ProcessPoolExecutor
+from pathlib import Path
+
+import numpy as np
+from scipy.optimize import least_squares
+
+ENGINE = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ENGINE))
+from zrmd import settings  # noqa: E402
+from zrmd.shaders import bank, compose  # noqa: E402
+
+CROP_W, CROP_H = 64, 100
+HD_W, HD_H = 640, 1000
+# 12 October 2026: shape parameters of the vector (name, lo, hi, start); colours follow, 0..1 each channel.
+SHAPE = [("cx", 0.4, 0.6, 0.5), ("apex", 0.3, 0.8, 0.6), ("k", 0.1, 1.2, 0.6), ("p", 1.0, 3.0, 2.0), ("soft", 0.002, 0.05, 0.01),
+         ("w_rim", 0.005, 0.15, 0.03), ("w_core", 0.01, 0.3, 0.1), ("w_out", 0.02, 0.6, 0.25), ("side0", 0.0, 0.5, 0.2), ("side1", 0.5, 1.0, 0.9), ("side_axis", 0.0, 1.0, 0.7),
+         ("dot_y", 0.2, 0.7, 0.45), ("dot_r", 0.0, 0.06, 0.02), ("ring_sigma", 0.002, 0.03, 0.006), ("ring_gain", 0.0, 1.5, 0.5)]
+# 12 October 2026: colour starts from the S1 measurements of the look (sRGB hex converted to 0..1).
+def _hex(h):
+    return [int(h[i:i + 2], 16) / 255.0 for i in (1, 3, 5)]
+
+
+COLOURS = [("c_rim", _hex("#01076e")), ("c_rim_side", _hex("#9a6e1f")), ("c_core", _hex("#d6d6d8")), ("c_core_side", _hex("#d8d5c8")),
+           ("c_out", _hex("#335a80")), ("c_top", _hex("#000012")), ("c_in", _hex("#000000")), ("dot_color", _hex("#141414")),
+           ("ring_color", _hex("#a0a0a0"))]
+STARTS = [(a, k, p) for a in (0.45, 0.55, 0.65) for k in (0.35, 0.7) for p in (1.3, 2.0, 2.8)]
+
+
+def x0_vector(apex=None, k=None, p=None):
+    s = {n: v for n, _, _, v in SHAPE}
+    s.update({k_: v for k_, v in (("apex", apex), ("k", k), ("p", p)) if v is not None})
+    return np.array([s[n] for n, *_ in SHAPE] + [c for _, col in COLOURS for c in col], float)
+
+
+LO = np.array([lo for _, lo, _, _ in SHAPE] + [0.0] * 3 * len(COLOURS))
+HI = np.array([hi for _, _, hi, _ in SHAPE] + [1.0] * 3 * len(COLOURS))
+
+
+def layers(x, aspect):
+    s = {n: float(x[i]) for i, (n, *_) in enumerate(SHAPE)}
+    o = len(SHAPE)
+    c = {n: [float(v) for v in x[o + 3 * j:o + 3 * j + 3]] for j, (n, _) in enumerate(COLOURS)}
+    arch = {k: s[k] for k in ("cx", "apex", "k", "p", "soft", "w_rim", "w_core", "w_out")}
+    arch.update({k: c[k] for k in ("c_rim", "c_rim_side", "c_core", "c_core_side", "c_out", "c_top", "c_in")})
+    arch.update({"side": [s["side0"], s["side1"]], "side_axis": s["side_axis"], "aspect": aspect})
+    centre = [s["cx"], s["dot_y"]]
+    return [
+        {"block": "arch_glow_field", "params": arch},
+        {"block": "solid_color", "params": {"color": c["dot_color"]},
+         "mask": {"block": "sdf_circle", "params": {"center": centre, "radius": s["dot_r"], "soft": 0.003, "aspect": aspect}}},
+        {"block": "glow_ring", "blend": "add", "params": {"color": c["ring_color"], "center": centre, "radius": s["dot_r"],
+                                                          "sigma": s["ring_sigma"], "intensity": s["ring_gain"], "aspect": aspect}},
+    ]
+
+
+def rms(a, b):
+    return float(np.sqrt(np.mean((np.asarray(a, float) - np.asarray(b, float)) ** 2)))
+
+
+def _fit(args):
+    x0, target, aspect, nfev = args
+    x0 = np.clip(x0, LO + 1e-6, HI - 1e-6)
+    f = lambda x: ((compose.evaluate(layers(x, aspect), CROP_W, CROP_H) - target) / 255.0).ravel()
+    r = least_squares(f, x0, bounds=(LO, HI), max_nfev=nfev, x_scale="jac", diff_step=1e-3)
+    return r.x, rms(compose.evaluate(layers(r.x, aspect), CROP_W, CROP_H), target)
+
+
+def main() -> int:
+    vdir = Path(sys.argv[1])
+    sel = [int(s) for s in (sys.argv[2] if len(sys.argv) > 2 else "10,48,92").split(",")]
+    out = Path(sys.argv[3]) if len(sys.argv) > 3 else settings.path("workshop") / "docs" / "build" / "S4-critic" / "fit"
+    out.mkdir(parents=True, exist_ok=True)
+    spec = importlib.util.spec_from_file_location("fit_arch_glow_crops", ENGINE / "Scripts" / "FitArchGlow.py")
+    fag = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(fag)
+    prm = json.loads((vdir / "params.json").read_text())["device3d"]
+    video = glob.glob("/Users/zenray/.claude/tmp/tmp-zenray-motion-design-refcache/onekey-pro-2/*.mp4")[0]
+    fam = json.loads((ENGINE / "params" / "device3d.json").read_text())["frame_rule"]
+    start = json.loads((vdir.parent / "motion.json").read_text())["source"]["start"]
+    track = prm["track"]
+    crops = fag.crops(video, start, len(track) / 60, track, prm["device"]["aspect"], prm["device"]["bezel"], fam["text_kernel"],
+                      size=(CROP_W, CROP_H))
+    sa = (prm["device"]["aspect"] - 2 * prm["device"]["bezel"]) / (1 - 2 * prm["device"]["bezel"])
+    aspect = 1.0 / sa  # 12 October 2026: screen width / height, the isotropy the arch distance needs.
+    old = {r["frame"]: r["rms"] for r in json.loads((vdir / "archglow.json").read_text())} if (vdir / "archglow.json").exists() else {}
+
+    results, comps = [], []
+    with ProcessPoolExecutor(max_workers=16) as pool:
+        for i in sel:
+            target = crops[i].astype(float)
+            # 12 October 2026: multi-start on the arch shape (the old single start fell into a chevron minimum).
+            tries = list(pool.map(_fit, [(x0_vector(a, k, p), target, aspect, 120) for a, k, p in STARTS]))
+            best = min(tries, key=lambda t: t[1])
+            x, r = _fit((best[0], target, aspect, 800))
+            comps.append(layers(x, aspect))
+            results.append({"frame": i, "t_s": round(start + i / 60, 3), "rms_numpy": round(r, 2), "rms_old_archglow": old.get(i),
+                            "start_rms": [round(t[1], 2) for t in tries], "x": [round(float(v), 5) for v in x]})
+            print(i, "rms", round(r, 2), "old", old.get(i), flush=True)
+
+    glsl_crop = bank.render_glsl_batch(comps, CROP_W, CROP_H)
+    glsl_hd = bank.render_glsl_batch(comps, HD_W, HD_H)
+    from PIL import Image
+    rows = []
+    for res, comp, i, g, ghd in zip(results, comps, sel, glsl_crop, glsl_hd):
+        num = compose.evaluate(comp, CROP_W, CROP_H)
+        res["rms_glsl_vs_crop"] = round(rms(g, crops[i]), 2)
+        res["glsl_vs_numpy_mean"] = round(float(np.abs(g.astype(float) - num).mean()), 4)
+        res["glsl_vs_numpy_max"] = round(float(np.abs(g.astype(float) - num).max()), 3)
+        res["layers"] = comp
+        Image.fromarray(ghd).save(out / f"frame{i:03d}-glsl-{HD_W}x{HD_H}.png")
+        big = lambda a: np.asarray(Image.fromarray(np.asarray(a, np.uint8)).resize((CROP_W * 4, CROP_H * 4), Image.NEAREST))
+        rows.append(np.hstack([big(crops[i]), big(g), np.asarray(Image.fromarray(ghd).resize((CROP_W * 4, CROP_H * 4), Image.LANCZOS))]))
+    Image.fromarray(np.vstack(rows)).save(out / "board-crop-glsl-hd.png")
+    report = {"date": "12 October 2026", "version_dir": str(vdir), "crop": [CROP_W, CROP_H], "screen_aspect_w_over_h": aspect,
+              "composition": ["arch_glow_field", "solid_color masked by sdf_circle", "glow_ring add"], "frames": results}
+    (out / "fit-arch-glow-bank.json").write_text(json.dumps(report, indent=1) + "\n")
+    for r in results:
+        print(f"frame {r['frame']}  rms numpy {r['rms_numpy']}  rms GLSL {r['rms_glsl_vs_crop']}  old {r['rms_old_archglow']}  "
+              f"GLSL vs numpy mean {r['glsl_vs_numpy_mean']} max {r['glsl_vs_numpy_max']}")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

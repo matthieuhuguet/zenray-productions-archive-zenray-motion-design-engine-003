@@ -1,0 +1,32 @@
+#!/usr/bin/env python3
+# 12 October 2026: task M2, one Markdown table of every music-bench version (stage, mix and stem scores), read from
+# scores.json and scores-stable.json. FR : tableau de toutes les versions du banc musical.
+import json
+import sys
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(ROOT))
+from zrmd.audio import resynth as RS  # noqa: E402
+
+
+def main():
+    bench = Path(RS.params()["paths"]["bench"])
+    print("| Version | Kind | Mix tfBands | Mix plossEvents | Mix plossBarNoOnset | Mix ploss bar (official) | Drums tf | Bass tf | Other tf | Mix onset F | Mix chroma |")
+    print("|---|---|---|---|---|---|---|---|---|---|---|")
+    for d in sorted(bench.glob("V_*")):
+        meta = json.loads((d / "meta.json").read_text())
+        kind = meta.get("stage") or meta.get("kind")
+        if not (d / "scores.json").exists():
+            print(f"| {d.name} | {kind} | | | | | | | | | |")
+            continue
+        h = json.loads((d / "scores.json").read_text())["headline"]
+        st = json.loads((d / "scores-stable.json").read_text())["stable"] if (d / "scores-stable.json").exists() else {k: v for k, v in h.items()}
+        g = lambda s, k: st.get(s, {}).get(k, "")  # noqa: E731
+        m = h["mix"]
+        print(f"| {d.name} | {kind} | {g('mix', 'tfBands')} | {g('mix', 'plossEvents')} | {g('mix', 'plossBarNoOnset')} | {m['plossBarMedian']} | "
+              f"{g('drums', 'tfBands')} | {g('bass', 'tfBands')} | {g('other', 'tfBands')} | {m['onsetF']} | {m['chroma']} |")
+
+
+if __name__ == "__main__":
+    main()

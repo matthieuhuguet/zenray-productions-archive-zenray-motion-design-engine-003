@@ -1,0 +1,50 @@
+# 12 October 2026: shaker, a train of soft high-passed noise grains (count continuous, rate, swing delaying every other
+# stroke, attack and decay of each grain), alternating strong and weak strokes. Derived from the mathematics.
+# FR : shaker, grains de bruit aigu en motif balancé.
+import torch
+
+from zrmd.audio import sfxdsp as D
+from zrmd.audio.bank import Block, db_to_amp
+
+K, WEAK = 16, 0.6
+TEMPLATE_N = 9600  # 12 October 2026 (A1): 200 ms stroke template, longer than 0.04 s attack plus 0.15 s T60
+# 12 October 2026 (A1): every grain peaks ATTACK_MAX after its stroke time whatever its attack, so attack no longer
+# moves the strokes in time (measured: onset and attack traded and the fit stuck at 67.5 and 92.6).
+ATTACK_MAX = 0.04
+META = D.meta("foley", "Shaker: soft high-passed noise grains in a swung pattern, alternating strong and weak strokes.", ["foley", "shaker", "percussion", "pattern", "noise"], "deterministic stroke pattern of filtered noise")
+
+
+class Shaker(Block):
+    ID = "shaker"
+    # 12 October 2026 (A1): stroke pattern, so the fitter guides with a time blur first (see ploss.time_blur_error).
+    FIT = {"screenBlurMs": 25.0, "blurStartMs": 30.0, "blurEndMs": 2.0, "screenSamples": 768,
+           "scanGroups": [["onset_s", "rate_hz", "swing"], "*"],
+           # 12 October 2026 (A1): onset trades against attack (grain peak time) and swing against onset (odd strokes);
+           # measured stuck at 67.5 and 92.6 without these joint scans, so they are scanned together.
+           "scanPairs": [["rate_hz", "onset_s"], ["onset_s", "attack_s"], ["swing", "onset_s"], ["count", "swing"], ["hp_hz", "amp_db"],
+                         ["swing", "attack_s"], ["hp_hz", "decay_s"]],
+           # 12 October 2026 (A1): a larger budget (more starts and scan rounds, a third wider CMA-ES run): with the
+           # peak-aligned attack one swung case reached 98.8 and the other stayed at 78.5 on the default budget.
+           "starts": 12, "scanRounds": 6, "cmaSigmas": [0.05, 0.2, 0.4], "cmaIters": 250}
+    PARAMS = [
+        D.param("count", "strokes", 1, 16, 8, "lin", "number of strokes (continuous)"),
+        D.param("rate_hz", "strokes/s", 4, 20, 10, "log", "stroke rate"),
+        D.param("swing", "x period", 0.0, 0.4, 0.15, "lin", "delay of every other stroke"),
+        D.param("hp_hz", "Hz", 2000, 12000, 5000, "log", "high-pass cutoff"),
+        D.param("attack_s", "s", 0.002, ATTACK_MAX, 0.01, "log", "attack of each grain (its peak stays at stroke time + 0.04 s)"),
+        D.param("decay_s", "s (T60)", 0.01, 0.15, 0.05, "log", "decay of each grain"),
+        D.AMP(-14.0), D.ONSET(),
+    ]
+
+    def synth(self, v, t, sr):
+        dev = t.device
+        times = D.hit_times(v["onset_s"], v["rate_hz"], K, 0.0, 0.0, dev, swing=v["swing"])
+        accent = 1.0 - (1.0 - WEAK) * (torch.arange(K, device=dev) % 2).float()
+        # 12 October 2026 (A1): stroke templates with their own noise, placed by exact delays (sfxdsp.delay_sum).
+        u = D.template_time(t, TEMPLATE_N, sr)  # 13 October 2026: window-independent axis
+        tpl = D.stroke_noise(self, K, TEMPLATE_N, dev) * D.decay(u, ATTACK_MAX - v["attack_s"], v["decay_s"], v["attack_s"])[None, :]
+        y = D.delay_sum(tpl, times, D.soft_count(v["count"], K, dev) * accent, t.shape[0], sr)
+        return db_to_amp(v["amp_db"]) * D.filtered(y, lambda fr: D.highpass(fr, v["hp_hz"], 24.0), sr)
+
+
+BLOCK = Shaker

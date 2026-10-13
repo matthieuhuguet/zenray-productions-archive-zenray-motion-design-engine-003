@@ -1,0 +1,46 @@
+# 12 October 2026: stereo_width, mid/side widening of a mono or narrow bus: the side is a Haas-delayed copy minus the
+# signal, S = width * (x(t - haas) - x) / 2, then L = M + S, R = M - S. Stereo block (mono view: left channel).
+# FR : élargissement mid/side par effet Haas.
+import math
+
+import torch
+
+from zrmd.audio.bank import db_to_amp, stft_filter
+from zrmd.audio import fxdsp as F
+from zrmd.audio.fxdsp import EffectBlock
+from zrmd.audio.fxdsp import param as P
+
+META = {"family": "stereo", "kind": "effect", "stereo": True,
+        "description": "Mid/side widener with a Haas-delayed side (width, Haas delay in ms). Stereo block: mono view is the left channel. Wide pads, spacious UI sounds. (12 October 2026)",
+        "tags": ["effect", "stereo", "width", "haas", "mid-side"],
+        "sources": [{"what": "mid/side matrix and precedence (Haas) effect", "url": None, "licence": F.SOURCE}],
+        "licence": "original"}
+
+
+class StereoWidth(EffectBlock):
+    ID = "stereo_width"
+    # 12 October 2026 (A2): fit hints measured on the failed cases of the first A2 verification (docs/build/
+    # A2-tonal-effects.md): a larger search budget (second pass: finer scans, which a pitch basin of
+    # about 0.07 semitone at the third partial needs, and a larger evolution strategy), and coupled groups for the evolution strategy. FR : indications.
+    # 12 October 2026 (A2 resume): width and Haas delay form a narrow curved valley (at the truth width a Haas change
+    # of 0.0017 ms costs 27 points, and width 1.01 with Haas 20.0359 ms scored 99.13), so the evolution groups move
+    # width, Haas and level together, with 30 iterations to reach that scale: case 1 went from 99.13 to 99.9998.
+    # FR : vallée étroite largeur et délai Haas, recherche conjointe.
+    FIT = {"scanRounds": 6, "starts": 12, "screenSamples": 1024, "esSamples": 80, "esIters": 30, "polishRounds": 24, "scanPoints": 257, "scanZoomPoints": 33,
+           "scanGroups": [["width", "haas_ms", "out_db"], ["width", "haas_ms"], "*"]}
+    STEREO = True
+    PARAMS = [
+        P("width", "x", 0.0, 2.0, 1.2, "lin", "side level"),
+        P("haas_ms", "ms", 1.0, 30.0, 12.0, "log", "delay of the side copy"),
+        P("out_db", "dB", -24, 12, 0, "lin", "output gain"),
+    ]
+
+    def fx_stereo(self, v, x, t, sr):
+        n = x.shape[0]
+        xd = F.apply_response(x, lambda w: F.delay_phase(w, v["haas_ms"] * 1e-3 * sr), int(0.05 * sr))
+        side = v["width"] * 0.5 * (xd - x)
+        g = db_to_amp(v["out_db"])
+        return torch.stack([g * (x + side), g * (x - side)])
+
+
+BLOCK = StereoWidth

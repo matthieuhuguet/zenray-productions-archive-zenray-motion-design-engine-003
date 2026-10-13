@@ -1,0 +1,71 @@
+# ZenRay Motion Design : architecture du moteur zrmd (12 October 2026)
+
+Ce document fait foi pour le code du dépôt `/Users/zenray/Create/Build/Productions/GithubProductions/ZenRayMotionDesign`. Les recherches qui le fondent sont dans `/Users/zenray/.claude/tmp/tmp-zenray-motion-design/docs/research/` (R01 HyperFrames, R03 son, R04 image, R05 transposition de zenray-height, R06 site, R07 MCP, R08 existant, R09 vocabulaire, R10 3D, R11 polices). (12 October 2026)
+
+## 1. Principe (12 October 2026)
+
+Le moteur mesure une vidéo de référence, explique chaque plan par une recette ordonnée de gestes paramétriques (calques, courbes d'animation, effets, événements sonores), cuit cette recette en une composition HyperFrames déterministe, la rend, la mesure de la même façon que la référence, et corrige les paramètres jusqu'à ce que la dimension la plus faible atteigne la cible ou cesse de progresser. Chaque passe est une version figée V_001 à V_999. Aucun modèle génératif ne fabrique une image ou un son ; aucun fichier de la référence n'entre dans un livrable. (12 October 2026)
+
+## 2. Doctrine des droits, reprise de zenray-height (12 October 2026)
+
+- On mesure, on ne copie pas : la référence sert à obtenir des nombres (temps, courbes, couleurs, métriques typographiques, enveloppes sonores), jamais des pixels ni des échantillons. (12 October 2026)
+- La musique d'une référence ne se reprend jamais note à note : tempo, grille, sections, énergie et production (programmation de batterie, pompage, gate) seulement, harmonie et mélodie originales. (12 October 2026)
+- Le contenu de marque (logo, produit, nom, texte) est un paramètre : par défaut un contenu original de même géométrie. Une lecture OCR de la référence sert uniquement à mesurer (interlettrage, calibration du vérificateur) et ne sort jamais dans un livrable. (12 October 2026)
+- Les références vivent dans le cache local `/Users/zenray/.claude/tmp/tmp-zenray-motion-design-refcache/`, jamais archivé ; les rendus de calibration avec le texte de la référence y restent aussi. (12 October 2026)
+
+## 3. Arborescence (12 October 2026)
+
+| Chemin | Rôle |
+|---|---|
+| `ZenRayMotionDesign/zrmd/` | paquet Python (analyse, reproduction, émission, rendu, vérification, versions) |
+| `ZenRayMotionDesign/settings.json` | interface unique de paramètres du moteur (loi HDA) |
+| `ZenRayMotionDesign/datasets/` | bases : polices (`fonts/`), vocabulaire du mouvement (`motion-vocabulary.json`, issu de R09), signatures de recettes |
+| `ZenRayMotionDesign/tooling/` | HyperFrames 0.8.149 épinglé (`npm ci`), jamais global |
+| `ZenRayMotionDesign/Scripts/` | commandes : `RunHyperframes.mjs` (enveloppe privée), `ReproduceTextCard.py`, puis `Reproduce.py` |
+| `ZenRayMotionDesign/mcp/` | serveur MCP `zenray-motion-design` (Python standard, stdio, patron de zrhoudini.py) |
+| `ZenRayMotionDesign/service/` | service local `com.zenray.motion` sur `127.0.0.1:3102` (demandes d'itération, LOAD, montage) |
+| atelier `references/<slug>/` | métadonnées de chaque référence, mesures, bible graphique, storyboard (aucun média) |
+| atelier `motions/<motion-id>/` | `motion.json` (identité) et `V_001/` à `V_999/` |
+| atelier `catalog.json` | catalogue des motions lu par la galerie |
+
+## 4. Contrats de données (12 October 2026)
+
+### 4.1 Référence (12 October 2026)
+
+`references/<slug>/reference.json` (écrit par `Scripts/FetchReference.py`) : slug, page, média, sha256, durée, codecs, taille, cadence, audio. `references/<slug>/analysis/` : `shots.json` (`zrmd.analyze.shots.detect`), `layers-SXX.json`, `audio-events.json`, `music.json`, `bible.json`, `storyboard.html`.
+
+### 4.2 Motion et version (12 October 2026)
+
+`motions/<id>/motion.json` : `id`, `title`, `source` (`slug`, `start`, `end`, plans), `recipe` (famille : `textcard`, `graphic`, `plate`, `montage`), `tags`, `latest`, `versions`. `V_NNN/` : `params.json` (seule vérité), `version.json` (parent, date, note, surcharges), `16x9/` (projet HyperFrames cuit), `render.mp4`, `fidelity.json`, `poster.jpg`.
+
+### 4.3 params.json, schéma `zrmd/motion@1` (12 October 2026)
+
+`canvas` (largeur, hauteur, fps, nombre d'images), `fonts` (famille, fichier local), `layers` (identifiant, type `solid|gradient|shape|text|image|video|three`, z, géométrie, style, `tracks` : propriété vers liste de tweens `{start_frame, frames, from, to, ease}`), `audio` (pistes `sfx`, `music` en WAV 48 kHz), `measured` (mesures sources, pour la traçabilité). Tous les temps sont des images entières (contrat C3 de R01).
+
+### 4.4 Rapport de fidélité (12 October 2026)
+
+`fidelity.json` : `dimensions` (rythme, animation, image, couleur, typographie, son), chacune de 0 à 1, `weakest`, `score` = minimum, et le détail par élément et par événement. Le score d'une dimension compare des **paramètres mesurés dans les deux vidéos**, exprimés en seuils différentiels (R04 §11, R03 §7) ; l'image se juge hors du masque de contenu remplacé. Le plafond d'identité (référence contre elle-même) s'affiche à côté, comme la corrélation plafond de zenray-height.
+
+## 5. La boucle (12 October 2026)
+
+`mesurer -> construire -> cuire -> rendre -> mesurer le rendu -> corriger -> nouvelle version`, arrêtée quand la dimension la plus faible atteint la cible (0,99) ou quand une passe ne paie plus. Une correction n'est gardée que si elle améliore le score sans dégrader une autre dimension (porte locale de zenray-height). Exemple vérifié : `Scripts/ReproduceTextCard.py`, carte texte de OneKey S02, de 0,78 à 0,962 en sept passes.
+
+## 6. Familles de plans et stratégie (12 October 2026)
+
+| Famille | Reconnaissance | Reproduction |
+|---|---|---|
+| carte texte | fond plat, un groupe de texte | calque texte, police appariée (R11), courbes d'échelle, de luminosité, reflet balayé |
+| graphique | formes nettes, dégradés, orbes | calques mesurés (couleur, géométrie, courbes), primitives procédurales |
+| plaque | photo, rendu 3D, prise de vue | emplacement nommé animé (caméra mesurée, étalonnage mesuré) et doublure 3D (three.js ou Blender, R10), contenu fourni par Matthieu |
+| montage | coupes rapides | grille de coupes à l'image près, transitions mesurées |
+
+## 7. Son (12 October 2026)
+
+Selon R03 : décodage, séparation Demucs (mesure seulement), deux détecteurs (transitoires et houles), description, classement par arbre de règles, ajustement CMA-ES multi-départs, rendu des 18 recettes numpy, musique originale sur la grille mesurée, mixage à la sonie mesurée, score par événement S = 100 × 0,99^(E²).
+
+## 8. Interfaces (12 October 2026)
+
+- CLI `zrmd` : `ingest`, `analyze`, `bible`, `storyboard`, `reproduce`, `iterate`, `render`, `verify`, `catalog`, `montage`.
+- MCP `zenray-motion-design` : outils `motion_*` qui appellent la CLI ; tâches longues détachées, suivies par `status.json`.
+- Service `com.zenray.motion` (port 3102) et file `_requests/` dans `zenray-data` quand le Mac dort (patron Assets et Freelance, R06).
+- Site ZenRayProgress : entrée « Motion Design » après `media`, galerie façon YouTube, page motion (lecteur, versions, paramètres, demande d'itération), montage local.

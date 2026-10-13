@@ -1,0 +1,71 @@
+{
+  "id": "reverb_noise_tail",
+  "family": "reverb",
+  "kind": "effect",
+  "description": "Decaying filtered noise impulse response (T60, high frequency damping ratio, predelay), FFT convolution, equal power mix. Rooms, halls, tails. (12 October 2026)",
+  "tags": [
+    "effect",
+    "reverb",
+    "tail",
+    "room",
+    "hall",
+    "space"
+  ],
+  "sources": [
+    {
+      "what": "exponentially decaying noise reverb model",
+      "url": null,
+      "reference": "J. A. Moorer, About this reverberation business, CMJ 3(2), 1979",
+      "licence": "original (derived from the published mathematics, no code copied)"
+    }
+  ],
+  "licence": "original",
+  "params": [
+    {
+      "name": "t60_s",
+      "unit": "s",
+      "min": 0.1,
+      "max": 4.0,
+      "default": 1.2,
+      "scale": "log",
+      "description": "decay time at low frequencies"
+    },
+    {
+      "name": "hf_ratio",
+      "unit": "x",
+      "min": 0.1,
+      "max": 1.0,
+      "default": 0.4,
+      "scale": "log",
+      "description": "T60 at high frequencies relative"
+    },
+    {
+      "name": "predelay_s",
+      "unit": "s",
+      "min": 0.0,
+      "max": 0.1,
+      "default": 0.015,
+      "scale": "lin",
+      "description": "delay before the tail"
+    },
+    {
+      "name": "mix",
+      "unit": "0..1",
+      "min": 0.0,
+      "max": 1.0,
+      "default": 0.35,
+      "scale": "lin",
+      "description": "wet share, equal power"
+    },
+    {
+      "name": "out_db",
+      "unit": "dB",
+      "min": -24.0,
+      "max": 12.0,
+      "default": 0.0,
+      "scale": "lin",
+      "description": "output gain"
+    }
+  ],
+  "date": "12 October 2026"
+}

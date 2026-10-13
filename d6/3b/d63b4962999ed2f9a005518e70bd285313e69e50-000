@@ -1,0 +1,42 @@
+# 12 October 2026: marimba_bar, a tuned bar whose undercut tunes the first overtones to 3.99 and 9.14 times the
+# fundamental, plus a short fixed-seed mallet noise. Ratios from marimba acoustics (Bork, Rossing), derived from the
+# published measurements. FR : lame de marimba accordée et bruit de mailloche.
+import math
+
+import torch
+
+from zrmd.audio.bank import Block, db_to_amp, envelope, stft_filter
+from zrmd.audio import fxdsp as F
+from zrmd.audio.fxdsp import param as P
+
+META = {"family": "modal", "kind": "source",
+        "description": "Tuned bar modes 1, 3.99, 9.14 with an upper mode level, damping and a fixed-seed mallet click. Marimba, wood, soft UI taps. (12 October 2026)",
+        "tags": ["tonal", "modal", "marimba", "wood", "mallet", "tap"],
+        "sources": [{"what": "tuned bar overtone ratios", "url": None, "reference": "I. Bork, Practical tuning of xylophone bars and resonators, Applied Acoustics 46, 1995", "licence": F.SOURCE}],
+        "licence": "original"}
+RATIOS = [1.0, 3.99, 9.14]
+
+
+class MarimbaBar(Block):
+    ID = "marimba_bar"
+    PARAMS = [
+        P("f0_hz", "Hz", 80, 2500, 392, "log", "fundamental"),
+        P("upper_db", "dB", -40, 0, -9, "lin", "level of the 3.99 mode (the 9.14 mode sits 8 dB lower)"),
+        P("decay_s", "s (T60)", 0.05, 3.0, 0.8, "log", "decay of the fundamental"),
+        P("damp", "exponent", 0.0, 2.5, 1.2, "lin", "mode decay decay_s / ratio**damp"),
+        P("mallet_db", "dB", -50, -3, -24, "lin", "level of the 4 ms mallet noise, relative"),
+        P("amp_db", "dBFS", -60, 0, -12, "lin", "peak level"),
+        P("onset_s", "s", 0.0, 0.25, 0.02, "lin", "start time in the window"),
+    ]
+
+    def synth(self, v, t, sr):
+        up = db_to_amp(v["upper_db"])
+        freqs = [v["f0_hz"] * r for r in RATIOS]
+        gains = [torch.ones_like(up), up, up * 0.4]
+        decays = [v["decay_s"] / r ** v["damp"] for r in RATIOS]
+        y = F.partials(t, sr, freqs, gains, decays, v["onset_s"], torch.tensor(0.0008)) / (1.0 + 1.4 * up)
+        click = envelope(t, v["onset_s"], torch.tensor(0.0003), torch.tensor(0.004)) * self.noise(t.shape[0], t.device)
+        return F.amp(v) * (y + db_to_amp(v["mallet_db"]) * click)
+
+
+BLOCK = MarimbaBar

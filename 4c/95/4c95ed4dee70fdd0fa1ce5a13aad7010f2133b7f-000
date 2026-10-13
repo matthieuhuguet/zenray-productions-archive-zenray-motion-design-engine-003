@@ -1,0 +1,70 @@
+{
+  "id": "pluck_ks",
+  "family": "physical",
+  "kind": "source",
+  "description": "Karplus-Strong plucked string computed exactly in the frequency domain (fractional loop delay, averaging loop filter). Plucks, harp, koto, pizzicato UI notes. (12 October 2026)",
+  "tags": [
+    "tonal",
+    "pluck",
+    "string",
+    "karplus-strong",
+    "physical"
+  ],
+  "sources": [
+    {
+      "what": "plucked string loop",
+      "url": null,
+      "reference": "K. Karplus and A. Strong, Digital synthesis of plucked-string and drum timbres, CMJ 7(2), 1983; D. Jaffe and J. O. Smith, Extensions of the Karplus-Strong algorithm, CMJ 7(2), 1983",
+      "licence": "original (derived from the published mathematics, no code copied)"
+    }
+  ],
+  "licence": "original",
+  "params": [
+    {
+      "name": "f0_hz",
+      "unit": "Hz",
+      "min": 60.0,
+      "max": 2000.0,
+      "default": 196.0,
+      "scale": "log",
+      "description": "pitch"
+    },
+    {
+      "name": "decay_s",
+      "unit": "s (T60)",
+      "min": 0.1,
+      "max": 2.5,
+      "default": 1.2,
+      "scale": "log",
+      "description": "decay of the fundamental"
+    },
+    {
+      "name": "brightness",
+      "unit": "0..1",
+      "min": 0.0,
+      "max": 1.0,
+      "default": 0.5,
+      "scale": "lin",
+      "description": "0 strong loop lowpass (dull), 1 none (bright)"
+    },
+    {
+      "name": "amp_db",
+      "unit": "dBFS RMS",
+      "min": -60.0,
+      "max": 0.0,
+      "default": -28.0,
+      "scale": "lin",
+      "description": "RMS level over the window (default -28, 12 October 2026: peak under 0 dBFS)"
+    },
+    {
+      "name": "onset_s",
+      "unit": "s",
+      "min": 0.0,
+      "max": 0.25,
+      "default": 0.02,
+      "scale": "lin",
+      "description": "start time in the window"
+    }
+  ],
+  "date": "12 October 2026"
+}

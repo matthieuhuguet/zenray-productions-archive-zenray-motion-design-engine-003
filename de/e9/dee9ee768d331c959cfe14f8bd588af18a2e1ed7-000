@@ -1,0 +1,116 @@
+{
+  "id": "shimmer_partials",
+  "family": "modal",
+  "description": "Shimmer partials: six partials doubled by detuned twins that beat, a slow tremolo, soft attack and long decay. (12 October 2026)",
+  "tags": [
+    "tonal",
+    "shimmer",
+    "sparkle",
+    "magic",
+    "pad",
+    "chorus",
+    "beating",
+    "ui"
+  ],
+  "sources": [
+    {
+      "what": "detuned partial pairs with amplitude modulation",
+      "url": null,
+      "licence": "original (derived from the mathematics, no code copied)"
+    }
+  ],
+  "licence": "original",
+  "params": [
+    {
+      "name": "f0_hz",
+      "unit": "Hz",
+      "min": 100.0,
+      "max": 6000.0,
+      "default": 1200.0,
+      "scale": "log",
+      "description": "lowest partial"
+    },
+    {
+      "name": "stretch",
+      "unit": "exponent",
+      "min": 0.8,
+      "max": 2.0,
+      "default": 1.0,
+      "scale": "lin",
+      "description": "partial k sits at f0 * k^stretch"
+    },
+    {
+      "name": "detune_cents",
+      "unit": "cents",
+      "min": 0.0,
+      "max": 60.0,
+      "default": 12.0,
+      "scale": "lin",
+      "description": "detuning of each twin"
+    },
+    {
+      "name": "am_hz",
+      "unit": "Hz",
+      "min": 2.0,
+      "max": 30.0,
+      "default": 6.0,
+      "scale": "log",
+      "description": "tremolo rate (a shimmer flutters; a slower swell is the attack and decay)"
+    },
+    {
+      "name": "am_depth",
+      "unit": "0..1",
+      "min": 0.0,
+      "max": 1.0,
+      "default": 0.4,
+      "scale": "lin",
+      "description": "tremolo depth"
+    },
+    {
+      "name": "tilt_db_oct",
+      "unit": "dB/octave",
+      "min": -30.0,
+      "max": 6.0,
+      "default": -9.0,
+      "scale": "lin",
+      "description": "level of partial k per octave of k"
+    },
+    {
+      "name": "attack_s",
+      "unit": "s",
+      "min": 0.001,
+      "max": 0.5,
+      "default": 0.03,
+      "scale": "log",
+      "description": "attack time"
+    },
+    {
+      "name": "decay_s",
+      "unit": "s (T60)",
+      "min": 0.05,
+      "max": 6.0,
+      "default": 1.2,
+      "scale": "log",
+      "description": "decay"
+    },
+    {
+      "name": "amp_db",
+      "unit": "dBFS",
+      "min": -60.0,
+      "max": 0.0,
+      "default": -18.0,
+      "scale": "lin",
+      "description": "peak level of the main layer"
+    },
+    {
+      "name": "onset_s",
+      "unit": "s",
+      "min": 0.0,
+      "max": 0.25,
+      "default": 0.02,
+      "scale": "lin",
+      "description": "start time in the window"
+    }
+  ],
+  "date": "12 October 2026"
+}

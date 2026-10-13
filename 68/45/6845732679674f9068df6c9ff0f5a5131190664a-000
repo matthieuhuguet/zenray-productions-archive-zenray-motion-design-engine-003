@@ -1,0 +1,39 @@
+# 12 October 2026: lowpass_sweep, an RBJ lowpass whose cutoff glides exponentially from start_hz to end_hz with time
+# constant sweep_s (from the start of the window), applied as its magnitude response on the STFT grid, one cutoff per
+# frame (zero phase: the magnitude matches the biquad, the phase does not). Effect block: alone it processes the fixed
+# test exciter of zrmd/audio/fxdsp.py, in a chain it processes the bus. FR : filtre lowpass à coupure glissante.
+import math
+
+import torch
+
+from zrmd.audio.bank import db_to_amp, stft_filter
+from zrmd.audio import fxdsp as F
+from zrmd.audio.fxdsp import EffectBlock
+from zrmd.audio.fxdsp import param as P
+
+META = {"family": "filter", "kind": "effect",
+        "description": "Resonant lowpass whose cutoff glides from a start to an end frequency. Filter closes, muffles, underwater moves, dull downs. (12 October 2026)",
+        "tags": ['effect', 'filter', 'lowpass', 'sweep', 'muffle'],
+        "sources": [F.RBJ],
+        "licence": "original"}
+
+
+class LowpassSweep(EffectBlock):
+    ID = "lowpass_sweep"
+    PARAMS = [
+        P("start_hz", "Hz", 20, 16000, 6000, "log", "cutoff at the start of the window"),
+        P("end_hz", "Hz", 20, 16000, 400, "log", "cutoff reached"),
+        P("sweep_s", "s", 0.02, 1.0, 0.35, "log", "glide time constant"),
+        P("q", "Q", 0.5, 12.0, 2.0, "log", "resonance"),
+        P("out_db", "dB", -24, 12, 0, "lin", "output gain"),
+    ]
+
+    def fx(self, v, x, t, sr):
+        def mask(fr, tm):
+            fc = v["end_hz"] * torch.pow(v["start_hz"] / v["end_hz"], torch.exp(-tm / v["sweep_s"]))
+            return F.biquad_mag("lowpass", fr, fc, v["q"], sr=sr)
+
+        return db_to_amp(v["out_db"]) * stft_filter(x, mask, 1024, 256, sr)
+
+
+BLOCK = LowpassSweep

@@ -1,0 +1,97 @@
+{
+  "id": "notify_arpeggio",
+  "family": "notification",
+  "kind": "source",
+  "description": "Three-note arpeggio (two intervals in semitones, step time), four-partial harmonic notes with tilt. Success jingles, level up, confirmations. (12 October 2026)",
+  "tags": [
+    "tonal",
+    "notification",
+    "arpeggio",
+    "success",
+    "jingle",
+    "ui"
+  ],
+  "sources": [
+    {
+      "what": "additive notes",
+      "url": null,
+      "licence": "original (derived from the published mathematics, no code copied)"
+    }
+  ],
+  "licence": "original",
+  "params": [
+    {
+      "name": "f1_hz",
+      "unit": "Hz",
+      "min": 150.0,
+      "max": 3000.0,
+      "default": 523.0,
+      "scale": "log",
+      "description": "first note"
+    },
+    {
+      "name": "step1_st",
+      "unit": "semitones",
+      "min": 0.0,
+      "max": 12.0,
+      "default": 4.0,
+      "scale": "lin",
+      "description": "second note above the first"
+    },
+    {
+      "name": "step2_st",
+      "unit": "semitones",
+      "min": 0.0,
+      "max": 12.0,
+      "default": 3.0,
+      "scale": "lin",
+      "description": "third note above the second"
+    },
+    {
+      "name": "step_s",
+      "unit": "s",
+      "min": 0.03,
+      "max": 0.3,
+      "default": 0.09,
+      "scale": "log",
+      "description": "time between notes"
+    },
+    {
+      "name": "note_decay_s",
+      "unit": "s (T60)",
+      "min": 0.05,
+      "max": 2.0,
+      "default": 0.35,
+      "scale": "log",
+      "description": "decay of each note"
+    },
+    {
+      "name": "tilt",
+      "unit": "exponent",
+      "min": 0.5,
+      "max": 4.0,
+      "default": 2.0,
+      "scale": "lin",
+      "description": "partial k gain k**-tilt"
+    },
+    {
+      "name": "amp_db",
+      "unit": "dBFS",
+      "min": -60.0,
+      "max": 0.0,
+      "default": -12.0,
+      "scale": "lin",
+      "description": "peak level"
+    },
+    {
+      "name": "onset_s",
+      "unit": "s",
+      "min": 0.0,
+      "max": 0.25,
+      "default": 0.02,
+      "scale": "lin",
+      "description": "start time in the window"
+    }
+  ],
+  "date": "12 October 2026"
+}

@@ -1,0 +1,137 @@
+#!/usr/bin/env python3
+# 12 October 2026: task M3, assemble the full soundtrack benchmark: a music-bench version (the 1:1 music, rebuilt by
+# code from the score) plus the SFX track of a sound version (V_NNN of ReproduceSound.py), into the next free V_NNN of
+# the sound folder, scored by the existing verify pipeline (zrmd/audio/verify.py, same report as ReproduceSound.py).
+#   AssembleSoundtrack.py --music V_025 --sfx V_017 [--slug onekey-pro-2] [--sfx-gain-db 0] [--note TEXT]
+# The music bench is already mixed to the reference loudness by its own bus; the SFX track is added as rendered by its
+# version (re-rendered from the fitted parameters, so the per-stem copy used by the timing measure is exact), then the
+# sum is brought back to the reference integrated loudness under the -1 dBTP ceiling by the project limiter.
+# Outputs (ours only, 48 kHz): mix.wav, music.wav, sfx.wav, events.json (copied from the SFX version), music.json,
+# sound-fidelity.json, version.json (private: a 1:1 benchmark, never published). Exit 0 when verify passes, else 1.
+# FR : assemble la bande son complete du banc (musique 1:1 plus SFX), dans une version neuve, notee par verify.
+import os
+
+for _k in ("OMP_NUM_THREADS", "VECLIB_MAXIMUM_THREADS", "OPENBLAS_NUM_THREADS", "MKL_NUM_THREADS"):
+    os.environ.setdefault(_k, "1")
+import argparse
+import json
+import sys
+import time
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(ROOT))
+
+WORK = Path("/Users/zenray/.claude/tmp/tmp-zenray-motion-design")
+
+
+def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--music", required=True, help="music-bench version, e.g. V_025")
+    ap.add_argument("--sfx", required=True, help="sound version holding the SFX fits, e.g. V_017")
+    ap.add_argument("--slug", default="onekey-pro-2")
+    ap.add_argument("--sfx-gain-db", type=float, default=0.0)
+    ap.add_argument("--note", default="")
+    a = ap.parse_args()
+    import numpy as np
+    from scipy import signal
+
+    from zrmd import settings, versions
+    from zrmd.audio import config, loudness, mix, music, verify
+    from zrmd.audio.recipes import REGISTRY
+    from zrmd.media import load_audio, write_wav
+
+    t_all = time.time()
+    cfg = config.cfg()
+    sr = cfg["audio"]["sampleRate"]
+    sound = WORK / "sound" / a.slug
+    mb = sound / "music-bench" / a.music
+    sv = sound / a.sfx
+    stem_dir = settings.path("refcache") / a.slug / "stems" / "out" / "htdemucs" / "mix"
+    ref_mix = load_audio(settings.path("refcache") / a.slug / "stems" / "mix.wav", sr, mono=False)[0].astype(np.float64)
+    n = len(ref_mix)
+    ref_stems = {k: load_audio(stem_dir / f"{k}.wav", sr, mono=True)[0].astype(np.float64)[:n] for k in ("drums", "bass", "other")}
+    ref_music = music.analyze(ref_stems, sr)
+
+    def fit_len(x):
+        return x[:n] if len(x) >= n else np.pad(x, [(0, n - len(x))] + [(0, 0)] * (x.ndim - 1))
+
+    # Music bench: our stems and mix (44.1 kHz) brought to the verify rate. FR : la musique du banc, reechantillonnee.
+    mus = fit_len(mix.to_stereo(load_audio(mb / "mix.wav", sr, mono=False)[0].astype(np.float64)))
+    gen_stems = {k: fit_len(load_audio(mb / "stems" / f"{k}.wav", sr, mono=True)[0].astype(np.float64)) for k in ("drums", "bass", "other")}
+    gen_music = music.analyze(gen_stems, sr)
+
+    # SFX: re-rendered from the version's fits exactly as ReproduceSound.py step A7. FR : SFX re-rendus depuis les fits.
+    evd = json.loads((sv / "events.json").read_text())
+    events = [{k: v for k, v in e.items() if k != "fit"} for e in evd["events"]]
+    by_id = {e["id"]: e["fit"] for e in evd["events"] if e.get("fit")}
+    pre = cfg["audio"]["preRollSeconds"]
+    sfx_st, sfx_mono, sfx_by_stem, backgrounds = np.zeros((n, 2)), np.zeros(n), {}, {}
+    for e in events:
+        r = by_id.get(e["id"])
+        if not r:
+            continue
+        if r.get("chain"):
+            # 12 October 2026 (A4): a dfit bank chain covers its whole event window, placed at the window start,
+            # exactly as ReproduceSound.py step A7. FR : une chaîne de la banque se pose au début de sa fenêtre.
+            from zrmd.audio import bank as _bank
+            body = _bank.render_chain(r["chain"]).astype(np.float64)
+            at = int(round(e["windowStart"] * sr))
+        else:
+            body = REGISTRY[r["kind"]].render(r["params"], r.get("renderSeed", cfg["fit"]["targetSeed"]), sr).astype(np.float64)
+            at = int(round((e["windowStart"] + pre + r["offsetS"]) * sr))
+        body *= 10 ** (a.sfx_gain_db / 20.0)
+        if at >= n:
+            continue
+        a0 = max(at, 0)
+        body = body[a0 - at:][: n - a0]
+        sfx_mono[a0:a0 + len(body)] += body
+        sfx_by_stem.setdefault(e["stem"], np.zeros(n))[a0:a0 + len(body)] += body
+        st = mix.pan_stereo(body, r["params"].get("pan0", 0.0), r["params"].get("pan1", 0.0)) if r["kind"] == "swipe" else mix.to_stereo(body)
+        sfx_st[a0:a0 + len(body)] += st
+        if cfg["fit"]["useBackground"] and e.get("backgroundShiftS") is not None:
+            y = sum(ref_stems[k] for k in e["stem"].split("+"))
+            b0 = int((e["windowStart"] + e["backgroundShiftS"]) * sr)
+            backgrounds[e["id"]] = y[b0:b0 + int((e["windowEnd"] - e["windowStart"]) * sr)].copy()
+
+    # Sum, then the reference loudness under the ceiling (same loop as mix.mix). FR : somme, sonie, limiteur.
+    out = mus + sfx_st
+    target = loudness.integrated(ref_mix, sr)
+    m = cfg["mix"]
+    for _ in range(m["maxIterations"]):
+        out = out * mix.db_gain(target - loudness.integrated(out, sr))
+        out = mix.limiter(out, sr, m["truePeakCeilingDbtp"] - 0.1, cfg)
+        if abs(loudness.integrated(out, sr) - target) < 0.1 and loudness.true_peak_db(out, sr, m["oversample"]) <= m["truePeakCeilingDbtp"]:
+            break
+
+    ref_pack = {"mix": ref_mix, "events": events, "music": ref_music}
+    gen_pack = {"mix": out, "sfx": sfx_mono, "events": by_id, "music": gen_music, "backgrounds": backgrounds, "sfxByStem": sfx_by_stem}
+    reports = {"full": verify.report(ref_pack, gen_pack, sr, 0.0, n / sr)}
+    # The music bench alone through the same report (SFX track empty) shows what the SFX add. FR : la musique seule.
+    alone = verify.report(ref_pack, {**gen_pack, "mix": mus, "sfx": np.zeros(n), "sfxByStem": {}, "events": {}}, sr, 0.0, n / sr)
+
+    name = versions.next_version(sound)
+    vdir = sound / name
+    vdir.mkdir(parents=True, exist_ok=False)
+    write_wav(vdir / "mix.wav", out, sr)
+    write_wav(vdir / "music.wav", mus, sr)
+    write_wav(vdir / "sfx.wav", sfx_st, sr)
+    versions.write_json(vdir / "events.json", {**evd, "date": versions.stamp(), "copiedFrom": a.sfx})
+    versions.write_json(vdir / "music.json", {"date": versions.stamp(), "musicBench": a.music,
+                                              "reference": {k: v for k, v in ref_music.items() if k not in ("beats", "beatLevels")},
+                                              "generatedAnalysis": {k: v for k, v in gen_music.items() if k not in ("beats", "beatLevels")}})
+    fid = {"date": versions.stamp(), "slug": a.slug, "version": name, "parent": a.sfx, "musicBench": a.music, "reports": reports,
+           "musicAloneReport": {"scores": alone["scores"], "mix": alone["mix"]},
+           "mix": {"integratedLufs": round(loudness.integrated(out, sr), 2), "truePeakDbtp": round(loudness.true_peak_db(out, sr, m["oversample"]), 2),
+                   "referenceLufs": round(target, 2), "sfxGainDb": a.sfx_gain_db},
+           "seconds": round(time.time() - t_all, 1),
+           "rights": "1:1 benchmark, private: our synthesis only (music rebuilt from the transcribed score, SFX from fitted recipes); never published"}
+    versions.write_json(vdir / "sound-fidelity.json", fid)
+    versions.write_json(vdir / "version.json", {"version": name, "parent": a.sfx, "musicBench": a.music, "created": versions.stamp(),
+                                                "kind": "soundtrack-benchmark", "private": True, "note": a.note})
+    print(json.dumps({"version": str(vdir), "scores": reports["full"]["scores"], "musicAlone": alone["scores"], "seconds": fid["seconds"]}, indent=1))
+    sys.exit(0 if reports["full"]["pass"] else 1)
+
+
+if __name__ == "__main__":
+    main()

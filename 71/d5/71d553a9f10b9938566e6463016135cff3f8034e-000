@@ -1,0 +1,48 @@
+# 12 October 2026: filtered_noise_burst, fixed-seed white noise through a Gaussian band (in log frequency) whose
+# centre sweeps geometrically from center_start_hz to center_end_hz over the envelope, then an attack/decay envelope.
+# The band is applied as a magnitude mask in the STFT domain (torch.stft/istft), differentiable in every parameter.
+# Derived from the mathematics (no borrowed code). FR : bruit à graine fixe, bande gaussienne glissante, enveloppe.
+import math
+
+import torch
+
+from zrmd.audio.bank import Block, db_to_amp, envelope, stft_filter
+
+N_FFT, HOP = 1024, 256
+
+META = {
+    "family": "noise",
+    "description": "Fixed-seed white noise through a Gaussian log-frequency band sweeping from one centre to another, with attack and 60 dB decay. Whooshes, swishes, snares, air. (12 October 2026)",
+    "tags": ["noise", "band", "sweep", "whoosh", "swish", "air"],
+    "sources": [{"what": "STFT-domain magnitude mask", "url": None, "licence": "original (derived from the mathematics)"}],
+    "licence": "original",
+}
+
+
+class FilteredNoiseBurst(Block):
+    ID = "filtered_noise_burst"
+    PARAMS = [
+        {"name": "center_start_hz", "unit": "Hz", "min": 50.0, "max": 16000.0, "default": 2000.0, "scale": "log", "description": "band centre at onset"},
+        {"name": "center_end_hz", "unit": "Hz", "min": 50.0, "max": 16000.0, "default": 2000.0, "scale": "log", "description": "band centre at the end of the envelope"},
+        {"name": "bw_oct", "unit": "octaves (FWHM)", "min": 0.15, "max": 8.0, "default": 1.5, "scale": "log", "description": "band width at half maximum"},
+        {"name": "amp_db", "unit": "dBFS RMS", "min": -60.0, "max": 0.0, "default": -12.0, "scale": "lin", "description": "RMS level at the envelope peak"},
+        {"name": "onset_s", "unit": "s", "min": 0.0, "max": 0.25, "default": 0.02, "scale": "lin", "description": "start time in the window"},
+        {"name": "attack_s", "unit": "s", "min": 0.0005, "max": 0.5, "default": 0.01, "scale": "log", "description": "linear attack"},
+        {"name": "decay_s", "unit": "s (T60)", "min": 0.01, "max": 4.0, "default": 0.4, "scale": "log", "description": "time to fall 60 dB"},
+    ]
+
+    def synth(self, v, t, sr):
+        span = v["attack_s"] + v["decay_s"]
+        sigma = v["bw_oct"] / (2.0 * math.sqrt(2.0 * math.log(2.0)))
+
+        def mask(freqs, times):
+            k = torch.clamp((times - v["onset_s"]) / span, 0.0, 1.0)
+            centre = torch.log2(v["center_start_hz"]) + k * (torch.log2(v["center_end_hz"]) - torch.log2(v["center_start_hz"]))
+            return torch.exp(-0.5 * ((torch.log2(torch.clamp(freqs, min=10.0)) - centre) / sigma) ** 2)
+
+        y = stft_filter(self.noise(t.shape[0], t.device), mask, N_FFT, HOP, sr)
+        y = y / torch.sqrt(torch.mean(y * y) + 1e-12)
+        return db_to_amp(v["amp_db"]) * envelope(t, v["onset_s"], v["attack_s"], v["decay_s"]) * y
+
+
+BLOCK = FilteredNoiseBurst

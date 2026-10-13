@@ -1,0 +1,124 @@
+# 12 October 2026, 13:30 CEST: device screen look, second iteration of the bank fit (Scripts/FitArchGlowBank.py).
+# The three causes measured by S4 (docs/build/S4-critic.md section 5), each answered by a layer or a parameter:
+#   1. crop 128 x 200 instead of 64 x 100, so the thin cyan line and the deep blue rim are resolved;
+#   2. residual weighted by the screen mask (sdf_rounded_rect twin), so the device frame never enters the score;
+#   3. a warm glow_parabola layer in screen blend for the broad amber region on the lower flanks;
+# plus a fixed dark droplet colour (the free one fell into a grey local minimum).
+# Every value stays a parameter of the composition; the crop is analysis data, never a texture.
+# Usage: python -I Scripts/FitDeviceScreen.py <device3d version dir> [frames] [out dir] [crop WxH]
+from __future__ import annotations
+
+import importlib.util
+import json
+import sys
+from concurrent.futures import ProcessPoolExecutor
+from pathlib import Path
+
+import numpy as np
+from scipy.optimize import least_squares
+
+ENGINE = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ENGINE))
+from zrmd.shaders import bank, compose  # noqa: E402
+
+_spec = importlib.util.spec_from_file_location("fagb", ENGINE / "Scripts" / "FitArchGlowBank.py")
+fagb = importlib.util.module_from_spec(_spec); _spec.loader.exec_module(fagb)
+
+CW, CH = 128, 200
+# 12 October 2026: extra parameters of the warm flank layer (name, lo, hi, start), appended after the S4 vector.
+WARM = [("w_vx", 0.3, 0.7, 0.5), ("w_vy", 0.3, 0.9, 0.6), ("w_curv", 0.3, 8.0, 2.5), ("w_sigma", 0.01, 0.4, 0.12),
+        ("w_fill", 0.0, 1.0, 0.0), ("w_int", 0.0, 1.5, 0.5), ("w_r", 0.0, 1.0, 0.85), ("w_g", 0.0, 1.0, 0.45), ("w_b", 0.0, 1.0, 0.1)]
+DOT = [0.06, 0.06, 0.06]  # 12 October 2026: droplet colour fixed dark (measured on the reference droplet core).
+N0 = len(fagb.LO)
+LO = np.concatenate([fagb.LO, [w[1] for w in WARM]]); HI = np.concatenate([fagb.HI, [w[2] for w in WARM]])
+
+
+def layers(x, aspect):
+    L = fagb.layers(x[:N0], aspect)
+    L[1]["params"]["color"] = DOT
+    s = dict(zip([w[0] for w in WARM], x[N0:]))
+    L.insert(1, {"block": "glow_parabola", "blend": "screen",
+                 "params": {"color": [s["w_r"], s["w_g"], s["w_b"]], "vertex": [s["w_vx"], s["w_vy"]], "curvature": s["w_curv"],
+                            "sigma": s["w_sigma"], "fill": s["w_fill"], "intensity": s["w_int"], "aspect": aspect}})
+    return L
+
+
+def screen_mask(aspect, radius_w, w, h):
+    # 12 October 2026: rounded screen outline in crop space, from the device controls (radius as a fraction of width).
+    u, v = np.meshgrid((np.arange(w) + 0.5) / w, (np.arange(h) + 0.5) / h)
+    p = {"center": [0.5, 0.5], "half_size": [0.5 - 1.5 / w, 0.5 - 1.5 / h], "radius": radius_w * aspect, "soft": 1.0 / h, "aspect": aspect}
+    p = bank.resolve_params(bank.load("sdf_rounded_rect")["meta"], p)
+    return bank.twin_rgba("sdf_rounded_rect", p, u, v)[..., 3]
+
+
+def _fit(args):
+    # 12 October 2026: the size comes from the target, so worker processes never depend on a module global.
+    x0, target, wts, aspect, nfev = args
+    h, w = target.shape[:2]
+    x0 = np.clip(x0, LO + 1e-6, HI - 1e-6)
+    f = lambda x: ((compose.evaluate(layers(x, aspect), w, h) - target) / 255.0 * wts[..., None]).ravel()
+    r = least_squares(f, x0, bounds=(LO, HI), max_nfev=nfev, x_scale="jac", diff_step=1e-3)
+    return r.x, wrms(compose.evaluate(layers(r.x, aspect), w, h), target, wts)
+
+
+def wrms(a, b, w):
+    d = (np.asarray(a, float) - np.asarray(b, float)) ** 2
+    return float(np.sqrt((d * w[..., None]).sum() / (w.sum() * 3)))
+
+
+def main() -> int:
+    global CW, CH
+    vdir = Path(sys.argv[1])
+    sel = [int(s) for s in (sys.argv[2] if len(sys.argv) > 2 else "10,48,92").split(",")]
+    out = Path(sys.argv[3]) if len(sys.argv) > 3 else vdir / "screen-fit"
+    if len(sys.argv) > 4:
+        CW, CH = (int(v) for v in sys.argv[4].split("x"))
+    out.mkdir(parents=True, exist_ok=True)
+    spec = importlib.util.spec_from_file_location("fag", ENGINE / "Scripts" / "FitArchGlow.py")
+    fag = importlib.util.module_from_spec(spec); spec.loader.exec_module(fag)
+    import glob
+    prm = json.loads((vdir / "params.json").read_text())["device3d"]
+    video = glob.glob("/Users/zenray/.claude/tmp/tmp-zenray-motion-design-refcache/onekey-pro-2/*.mp4")[0]
+    fam = json.loads((ENGINE / "params" / "device3d.json").read_text())["frame_rule"]
+    start = json.loads((vdir.parent / "motion.json").read_text())["source"]["start"]
+    dev = prm["device"]
+    crops = fag.crops(video, start, len(prm["track"]) / 60, prm["track"], dev["aspect"], dev["bezel"], fam["text_kernel"], size=(CW, CH))
+    sa = (dev["aspect"] - 2 * dev["bezel"]) / (1 - 2 * dev["bezel"]); aspect = 1.0 / sa
+    rad = (dev["radius"] - dev["bezel"]) / (1 - 2 * dev["bezel"])
+    wts = screen_mask(aspect, rad, CW, CH)
+    from PIL import Image
+    results, comps = [], []
+    with ProcessPoolExecutor(max_workers=16) as pool:
+        for i in sel:
+            target = crops[i].astype(float)
+            warm0 = [w[3] for w in WARM]
+            starts = [np.concatenate([fagb.x0_vector(a, k, p), warm0]) for a, k, p in fagb.STARTS]
+            # 12 October 2026, 13:40: coarse to fine (machine shared with three workflows): starts at half size, then refine.
+            fw, fh = CW, CH
+            CW, CH = fw // 2, fh // 2
+            t_lo = np.asarray(Image.fromarray(crops[i].astype(np.uint8)).resize((CW, CH), Image.BILINEAR), float)
+            w_lo = screen_mask(aspect, rad, CW, CH)
+            tries = list(pool.map(_fit, [(x0, t_lo, w_lo, aspect, 120) for x0 in starts[::3]]))
+            best = min(tries, key=lambda t: t[1])
+            x, _ = _fit((best[0], t_lo, w_lo, aspect, 400))
+            CW, CH = fw, fh
+            x, r = _fit((x, target, wts, aspect, 150))
+            comps.append(layers(x, aspect))
+            results.append({"frame": i, "t_s": round(start + i / 60, 3), "wrms": round(r, 2), "x": [round(float(v), 5) for v in x]})
+            print(i, "masked rms", round(r, 2), flush=True)
+    glsl = bank.render_glsl_batch(comps, CW, CH)
+    from PIL import Image
+    rows = []
+    for res, comp, i, g in zip(results, comps, sel, glsl):
+        res["wrms_glsl"] = round(wrms(g, crops[i], wts), 2); res["layers"] = comp
+        big = lambda a: np.asarray(Image.fromarray(np.asarray(a, np.uint8)).resize((CW * 3, CH * 3), Image.NEAREST))
+        rows.append(np.hstack([big(crops[i]), big(g)]))
+    Image.fromarray(np.vstack(rows) if len(rows) < 4 else np.hstack([np.vstack(rows[j::2]) for j in (0, 1)] if False else np.vstack(rows))).save(out / "board.png")
+    (out / "fit.json").write_text(json.dumps({"date": "12 October 2026", "crop": [CW, CH], "frames": results}, indent=1) + "\n")
+    for r in results:
+        print(f"frame {r['frame']}  masked rms numpy {r['wrms']}  GLSL {r['wrms_glsl']}")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

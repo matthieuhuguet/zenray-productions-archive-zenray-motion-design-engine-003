@@ -1,0 +1,87 @@
+{
+  "id": "filtered_noise_burst",
+  "family": "noise",
+  "description": "Fixed-seed white noise through a Gaussian log-frequency band sweeping from one centre to another, with attack and 60 dB decay. Whooshes, swishes, snares, air. (12 October 2026)",
+  "tags": [
+    "noise",
+    "band",
+    "sweep",
+    "whoosh",
+    "swish",
+    "air"
+  ],
+  "sources": [
+    {
+      "what": "STFT-domain magnitude mask",
+      "url": null,
+      "licence": "original (derived from the mathematics)"
+    }
+  ],
+  "licence": "original",
+  "params": [
+    {
+      "name": "center_start_hz",
+      "unit": "Hz",
+      "min": 50.0,
+      "max": 16000.0,
+      "default": 2000.0,
+      "scale": "log",
+      "description": "band centre at onset"
+    },
+    {
+      "name": "center_end_hz",
+      "unit": "Hz",
+      "min": 50.0,
+      "max": 16000.0,
+      "default": 2000.0,
+      "scale": "log",
+      "description": "band centre at the end of the envelope"
+    },
+    {
+      "name": "bw_oct",
+      "unit": "octaves (FWHM)",
+      "min": 0.15,
+      "max": 8.0,
+      "default": 1.5,
+      "scale": "log",
+      "description": "band width at half maximum"
+    },
+    {
+      "name": "amp_db",
+      "unit": "dBFS RMS",
+      "min": -60.0,
+      "max": 0.0,
+      "default": -12.0,
+      "scale": "lin",
+      "description": "RMS level at the envelope peak"
+    },
+    {
+      "name": "onset_s",
+      "unit": "s",
+      "min": 0.0,
+      "max": 0.25,
+      "default": 0.02,
+      "scale": "lin",
+      "description": "start time in the window"
+    },
+    {
+      "name": "attack_s",
+      "unit": "s",
+      "min": 0.0005,
+      "max": 0.5,
+      "default": 0.01,
+      "scale": "log",
+      "description": "linear attack"
+    },
+    {
+      "name": "decay_s",
+      "unit": "s (T60)",
+      "min": 0.01,
+      "max": 4.0,
+      "default": 0.4,
+      "scale": "log",
+      "description": "time to fall 60 dB"
+    }
+  ],
+  "date": "12 October 2026"
+}

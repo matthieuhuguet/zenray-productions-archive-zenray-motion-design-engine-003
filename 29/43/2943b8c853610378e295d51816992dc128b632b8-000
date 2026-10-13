@@ -1,0 +1,41 @@
+# 12 October 2026 (A4): click_body, a transient with a learnable click spectrum (a noise click through a band of
+# centre, width and tilt, with its own decay) placed in front of a pitched body (a sine with a pitch drop and its own
+# decay) and an optional low thump, the attack-shape gap the A3 calibration left on click, tick, trigger, impact, boom
+# (stft and mel 1.0 to 2.0 JND). Parameter categories: click (click_hz, click_bw_oct, click_t60_s, click_db), body
+# (body_hz, drop_st, drop_ms, body_t60_s), level (amp_db, onset_s). Derived from the mathematics, no code copied.
+# FR : transitoire à spectre de clic réglable devant un corps accordé avec chute de hauteur.
+import torch
+
+from zrmd.audio import sfxdsp as D
+from zrmd.audio.bank import Block, db_to_amp
+
+META = D.meta("impact", "Click and body: a shaped noise click (centre, width, decay) in front of a pitched body with a pitch drop and its own decay.",
+              ["click", "tick", "impact", "trigger", "tap", "boom", "transient", "ui"], "band-passed noise click plus phase-accumulated sine body with pitch drop")
+
+
+class ClickBody(Block):
+    ID = "click_body"
+    FIT = {"scanPairs": [["click_hz", "click_bw_oct"], ["body_hz", "drop_st"], ["click_db", "body_t60_s"]]}
+    PARAMS = [
+        D.param("click_hz", "Hz", 200, 16000, 3000, "log", "click band centre"),
+        D.param("click_bw_oct", "octaves", 0.3, 8.0, 2.0, "log", "click band width"),
+        D.param("click_t60_s", "s (T60)", 0.001, 0.08, 0.008, "log", "click decay"),
+        D.param("click_db", "dB", -40, 20, 0, "lin", "click level relative to the body"),
+        D.param("body_hz", "Hz", 30, 3000, 150, "log", "body pitch after the drop"),
+        D.param("drop_st", "semitones", 0, 36, 7, "lin", "body start pitch above its final pitch"),
+        D.param("drop_ms", "ms", 1, 300, 30, "log", "time constant of the body pitch drop"),
+        D.param("body_t60_s", "s (T60)", 0.01, 3.0, 0.25, "log", "body decay"),
+        D.AMP(-14.0), D.ONSET(0.25, 0.02),
+    ]
+
+    def synth(self, v, t, sr):
+        n = self.noise(t.shape[0], t.device) * D.decay(t, v["onset_s"], v["click_t60_s"], 0.0002)
+        click = D.filtered(n, lambda fr: D.band(fr, v["click_hz"], v["click_bw_oct"]), sr)
+        u = torch.clamp(t - v["onset_s"], min=0.0)
+        f = v["body_hz"] * torch.pow(2.0, v["drop_st"] / 12.0 * torch.exp(-u / (v["drop_ms"] / 1000.0)))
+        body = 1.4142 * D.sweep_tone(t, v["onset_s"], f, sr) * D.decay(t, v["onset_s"], v["body_t60_s"], 0.0005)
+        c = db_to_amp(v["click_db"])
+        return db_to_amp(v["amp_db"]) * (body + c * click) / (1.0 + c)
+
+
+BLOCK = ClickBody

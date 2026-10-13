@@ -1,0 +1,87 @@
+{
+  "id": "cloth_swish",
+  "family": "foley",
+  "description": "Cloth swish: low-passed noise under a bell envelope with a flutter amplitude modulation. (12 October 2026)",
+  "tags": [
+    "foley",
+    "cloth",
+    "fabric",
+    "swish",
+    "movement",
+    "noise"
+  ],
+  "sources": [
+    {
+      "what": "filtered noise, bell envelope, sine amplitude modulation",
+      "url": null,
+      "licence": "original (derived from the mathematics, no code copied)"
+    }
+  ],
+  "licence": "original",
+  "params": [
+    {
+      "name": "cut_hz",
+      "unit": "Hz",
+      "min": 300.0,
+      "max": 8000.0,
+      "default": 2000.0,
+      "scale": "log",
+      "description": "low-pass cutoff"
+    },
+    {
+      "name": "duration_s",
+      "unit": "s",
+      "min": 0.1,
+      "max": 0.85,
+      "default": 0.4,
+      "scale": "log",
+      "description": "total length"
+    },
+    {
+      "name": "peak_pos",
+      "unit": "x duration",
+      "min": 0.15,
+      "max": 0.85,
+      "default": 0.4,
+      "scale": "lin",
+      "description": "position of the loudest instant"
+    },
+    {
+      "name": "flutter_hz",
+      "unit": "Hz",
+      "min": 2.0,
+      "max": 40.0,
+      "default": 10.0,
+      "scale": "log",
+      "description": "flutter rate"
+    },
+    {
+      "name": "flutter_depth",
+      "unit": "0..1",
+      "min": 0.0,
+      "max": 1.0,
+      "default": 0.3,
+      "scale": "lin",
+      "description": "flutter depth"
+    },
+    {
+      "name": "amp_db",
+      "unit": "dBFS",
+      "min": -60.0,
+      "max": 0.0,
+      "default": -14.0,
+      "scale": "lin",
+      "description": "peak level of the main layer"
+    },
+    {
+      "name": "onset_s",
+      "unit": "s",
+      "min": 0.0,
+      "max": 0.12,
+      "default": 0.02,
+      "scale": "lin",
+      "description": "start time in the window"
+    }
+  ],
+  "date": "12 October 2026"
+}

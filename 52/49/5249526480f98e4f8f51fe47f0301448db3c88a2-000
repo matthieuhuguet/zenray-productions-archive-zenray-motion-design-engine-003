@@ -1,0 +1,124 @@
+{
+  "id": "gated_tone",
+  "family": "gated",
+  "description": "Gated tone: a sustained harmonic tone (one pitch, tilt, odd/even balance) chopped by a periodic gate with duty, depth and smooth edges. (12 October 2026)",
+  "tags": [
+    "tonal",
+    "gate",
+    "chop",
+    "pad",
+    "lead",
+    "sustained",
+    "rhythmic"
+  ],
+  "sources": [
+    {
+      "what": "additive harmonic tone times a smooth periodic gate",
+      "url": null,
+      "licence": "original (derived from the mathematics, no code copied)"
+    }
+  ],
+  "licence": "original",
+  "params": [
+    {
+      "name": "f0_hz",
+      "unit": "Hz",
+      "min": 30.0,
+      "max": 4000.0,
+      "default": 784.0,
+      "scale": "log",
+      "description": "fundamental"
+    },
+    {
+      "name": "tilt_db_oct",
+      "unit": "dB/octave",
+      "min": -24.0,
+      "max": 6.0,
+      "default": -9.0,
+      "scale": "lin",
+      "description": "level of partial k relative to the fundamental per octave"
+    },
+    {
+      "name": "odd_db",
+      "unit": "dB",
+      "min": -30.0,
+      "max": 30.0,
+      "default": 0.0,
+      "scale": "lin",
+      "description": "level of the even partials relative to the odd ones (negative = hollow)"
+    },
+    {
+      "name": "rate_hz",
+      "unit": "Hz",
+      "min": 1.0,
+      "max": 24.0,
+      "default": 5.87,
+      "scale": "log",
+      "description": "gate frequency (5.87 Hz = sixteenths at 88 BPM)"
+    },
+    {
+      "name": "phase",
+      "unit": "cycles",
+      "min": 0.0,
+      "max": 1.0,
+      "default": 0.0,
+      "scale": "lin",
+      "description": "gate phase at the onset"
+    },
+    {
+      "name": "duty",
+      "unit": "fraction",
+      "min": 0.1,
+      "max": 0.95,
+      "default": 0.5,
+      "scale": "lin",
+      "description": "open part of each gate cycle"
+    },
+    {
+      "name": "depth_db",
+      "unit": "dB",
+      "min": 0.0,
+      "max": 60.0,
+      "default": 30.0,
+      "scale": "lin",
+      "description": "attenuation when the gate is closed"
+    },
+    {
+      "name": "edge_ms",
+      "unit": "ms",
+      "min": 0.5,
+      "max": 40.0,
+      "default": 4.0,
+      "scale": "log",
+      "description": "smoothness of the gate edges"
+    },
+    {
+      "name": "release_s",
+      "unit": "s (T60)",
+      "min": 0.1,
+      "max": 20.0,
+      "default": 4.0,
+      "scale": "log",
+      "description": "slow decay of the tone"
+    },
+    {
+      "name": "amp_db",
+      "unit": "dBFS",
+      "min": -60.0,
+      "max": 0.0,
+      "default": -18.0,
+      "scale": "lin",
+      "description": "peak level of the main layer"
+    },
+    {
+      "name": "onset_s",
+      "unit": "s",
+      "min": 0.0,
+      "max": 0.25,
+      "default": 0.02,
+      "scale": "lin",
+      "description": "start time in the window"
+    }
+  ],
+  "date": "12 October 2026"
+}

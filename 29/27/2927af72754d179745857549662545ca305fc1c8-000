@@ -1,0 +1,39 @@
+# 12 October 2026: key_press, one mechanical key: a band-passed down click, a bottom-out thock (a low mode plus
+# low-passed noise) and a release click hold_s later. Derived from the mathematics. FR : une touche de clavier mécanique.
+import torch
+
+from zrmd.audio import sfxdsp as D
+from zrmd.audio.bank import Block, db_to_amp
+
+CLICK_BW_OCT, CLICK_T60, THOCK_LP_RATIO = 1.5, 0.004, 4.0
+CLICK_N = 480  # 12 October 2026 (A1): 10 ms click template, longer than the 4 ms T60
+META = D.meta("foley", "Key press: down click, bottom-out thock (low mode and low-passed noise), release click after a hold.", ["foley", "keyboard", "key", "click", "mechanical", "transient"], "filtered noise clicks and a decaying mode")
+
+
+class KeyPress(Block):
+    ID = "key_press"
+    PARAMS = [
+        D.param("click_hz", "Hz", 1000, 10000, 3500, "log", "click band centre"),
+        D.param("thock_hz", "Hz", 80, 800, 250, "log", "pitch of the bottom-out mode"),
+        D.param("decay_s", "s (T60)", 0.01, 0.2, 0.05, "log", "thock decay"),
+        D.param("thock_db", "dB re click", -24, 6, -4, "lin", "thock level"),
+        D.param("hold_s", "s", 0.04, 0.35, 0.12, "log", "time until the key is released"),
+        D.param("release_db", "dB re click", -40, 0, -9, "lin", "release click level"),
+        D.AMP(-14.0), D.ONSET(),
+    ]
+
+    def synth(self, v, t, sr):
+        o, dev = v["onset_s"], t.device
+        n = self.noise(t.shape[0], dev)
+        # 12 October 2026 (A1): down and release clicks are templates with their own noise, placed by exact delays
+        # (sfxdsp.delay_sum), so hold_s has a smooth basin. FR : clics d'appui et de relâche en gabarits retardés.
+        tpl = D.stroke_noise(self, 2, CLICK_N, dev) * D.decay(D.template_time(t, CLICK_N, sr), 0.0, CLICK_T60, 0.0002)[None, :]
+        w = torch.stack([torch.ones((), device=dev), db_to_amp(v["release_db"])])
+        clicks = D.filtered(D.delay_sum(tpl, torch.stack([o, o + v["hold_s"]]), w, t.shape[0], sr),
+                            lambda fr: D.band(fr, v["click_hz"], CLICK_BW_OCT), sr)
+        mode = D.partials(t, o, v["thock_hz"][None], v["decay_s"][None], torch.ones(1, device=dev))
+        rumble = D.filtered(torch.roll(n, t.shape[0] // 3), lambda fr: D.lowpass(fr, v["thock_hz"] * THOCK_LP_RATIO, 18.0), sr) * D.decay(t, o, v["decay_s"] * 0.5, 0.0003)
+        return db_to_amp(v["amp_db"]) * (clicks + db_to_amp(v["thock_db"]) * (mode + rumble))
+
+
+BLOCK = KeyPress

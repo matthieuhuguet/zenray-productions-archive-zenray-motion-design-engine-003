@@ -1,0 +1,50 @@
+# 12 October 2026, 16:20 CEST: run the caption closed loop on several caption windows in parallel.
+# Input: a TSV file "motion_id<TAB>start<TAB>end<TAB>words" (one caption per line). Each runs
+# Scripts/ReproduceTextCard.py in its own process; logs go to <workshop>/logs/<motion_id>.log.
+# Run: python -I Scripts/ReproduceCaptions.py --slug onekey-pro-2 --tsv captions.tsv --jobs 3
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import subprocess
+import sys
+from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
+
+ENGINE = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(ENGINE))
+from zrmd import settings  # noqa: E402
+
+
+def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--slug", required=True); ap.add_argument("--tsv", required=True)
+    ap.add_argument("--jobs", type=int, default=3); ap.add_argument("--passes", type=int, default=6)
+    a = ap.parse_args()
+    workshop = settings.path("workshop")
+    meta = json.loads((workshop / "references" / a.slug / "reference.json").read_text(encoding="utf-8"))
+    video = str(settings.path("refcache") / a.slug / meta["file_name"])
+    rows = [line.rstrip("\n").split("\t") for line in Path(a.tsv).read_text(encoding="utf-8").splitlines() if line.strip()]
+    (workshop / "logs").mkdir(parents=True, exist_ok=True)
+    env = {**os.environ, "OMP_NUM_THREADS": "2", "VECLIB_MAXIMUM_THREADS": "2"}
+
+    def run(row):
+        motion_id, start, end, words = row
+        log = workshop / "logs" / f"{motion_id}.log"
+        with open(log, "w") as handle:
+            code = subprocess.run([sys.executable, "-I", str(ENGINE / "Scripts" / "ReproduceTextCard.py"), "--video", video,
+                                   "--start", start, "--end", end, "--motion", str(workshop / "motions" / motion_id),
+                                   "--words", words, "--passes", str(a.passes)], stdout=handle, stderr=subprocess.STDOUT,
+                                  cwd=str(ENGINE), env=env).returncode
+        lines = log.read_text(encoding="utf-8", errors="replace").splitlines()
+        best = next((l for l in reversed(lines) if l.startswith("{")), "{}")
+        return {"motion": motion_id, "exit": code, "best": json.loads(best)}
+
+    with ThreadPoolExecutor(max_workers=a.jobs) as pool:
+        results = list(pool.map(run, rows))
+    print(json.dumps(results, indent=1))
+
+
+if __name__ == "__main__":
+    main()

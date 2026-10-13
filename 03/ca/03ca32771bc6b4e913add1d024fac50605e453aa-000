@@ -1,0 +1,358 @@
+# 12 October 2026: F3 command line. Reproduce every text and 2D mark of a reference 1:1 (private benchmark) as
+# motion versions, then vary them by parameters only. Subcommands: extract, coverage, fit, svg, vary, table.
+# Inventory: references/<slug>/marks-f3.json. Analysis crops: the reference cache (never a deliverable).
+from __future__ import annotations
+
+import argparse
+import json
+import sys
+from concurrent.futures import ProcessPoolExecutor
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+import numpy as np  # noqa: E402
+from PIL import Image  # noqa: E402
+
+from zrmd import settings  # noqa: E402
+from zrmd.vector import marks as K  # noqa: E402
+
+
+def _marks(slug, ids):
+    inv = K.inventory(slug)["marks"]
+    return [m for m in inv if not ids or m["id"] in ids]
+
+
+def _extract_one(job):
+    slug, m = job
+    try:
+        return K.choose_frame(slug, m)
+    except Exception as e:  # report and continue, never silent
+        return {"id": m["id"], "error": repr(e)}
+
+
+def cmd_extract(a):
+    jobs = [(a.slug, m) for m in _marks(a.slug, a.ids)]
+    with ProcessPoolExecutor(settings.get("vector.marks.workers")) as pool:
+        for r in pool.map(_extract_one, jobs):
+            print(json.dumps(r))
+
+
+def cmd_coverage(a):
+    """Contact sheet of crops and coverage maps, for review (analysis only, reference cache)."""
+    rows = []
+    for m in _marks(a.slug, a.ids):
+        d = K.mark_cache(a.slug, m["id"])
+        rgb = np.asarray(Image.open(d / "crop.png").convert("RGB"))
+        cv = K.coverage(rgb, m.get("occluders"))
+        c8 = (cv["c"] * 255).astype(np.uint8)
+        w8 = (cv["weight"] * 255).astype(np.uint8)
+        tile = np.concatenate([rgb, np.stack([c8] * 3, 2), np.stack([w8] * 3, 2)], axis=1)
+        rows.append((m["id"], tile, cv["I"]))
+        print(m["id"], "ink", np.round(cv["I"], 1).tolist(), "hidden", int((cv["weight"] == 0).sum()))
+    W = max(t.shape[1] for _, t, _ in rows)
+    sheet = np.concatenate([np.pad(t, ((4, 4), (0, W - t.shape[1]), (0, 0)), constant_values=60) for _, t, _ in rows])
+    out = K.REFCACHE / a.slug / "f3" / "coverage-sheet.png"
+    Image.fromarray(sheet).save(out)
+    print(out)
+
+
+def _fit_one(job):
+    """One measured fitting pass for a text mark, written as the next version (never overwriting). 12 October 2026."""
+    slug, m, font_file, fit_axes, axes, note, cont = job[:7]
+    explicit = job[7] if len(job) > 7 else None
+    from zrmd import versions as V
+    from zrmd.vector import render as R
+    try:
+        ref = K.reference_of(slug, m)
+        md = K.motion_dir(slug, m["id"])
+        start = None
+        last = V.latest_version(md)
+        if cont and last:
+            P0 = json.loads((md / last / "params.json").read_text())
+            if P0["font"]["file"] == font_file:
+                lp = K.line_params(P0)
+                lp["origin"] = [lp["origin"][0] - ref["offset"][0], lp["origin"][1] - ref["offset"][1]]
+                start = lp
+        if explicit is not None:
+            start = {**explicit, "origin": [explicit["origin"][0], explicit["origin"][1]]}
+        keep = np.asarray(K.ndi.binary_dilation(ref["keep"], iterations=2), np.float32)
+        p = K.fit_text(m["text"], font_file, ref["c"], ref["weight"], axes=axes, fit_axes=fit_axes, start=start,
+                       init_mask=keep)
+        colour, lightmap = K.lightmap_from_ref(ref)
+        P = {"schema": "zrmd/mark@1", "date": "12 October 2026", "slug": slug, "mark": m["id"], "kind": "text",
+             "family": m["family"], "rights": "private-1to1",
+             "rights_note": "1:1 benchmark of a third-party mark, private, never published (Rules.md, 12 October 2026)",
+             "text": m["text"], "font": {"file": font_file, "family": Path(font_file).parent.name, "axes": p["axes"]},
+             "size_px": round(p["size"], 4), "tracking_em": round(p["tracking_em"], 6),
+             "deltas_px": p.get("deltas"),
+             "origin_px": [round(p["origin"][0] + ref["offset"][0], 3), round(p["origin"][1] + ref["offset"][1], 3)],
+             "blur_px": round(p["blur_px"], 4), "colour": colour, "lightmap": lightmap, "opacity": 1.0,
+             "canvas": [1920, 1080],
+             "source": {"time_s": ref["time_s"], "region": m["region"], "crop_box_tlbr": list(map(int, ref["box"]))}}
+        folder = V.create_version(md, P, note=note)
+        rgba = K.cook_text(P)
+        Image.fromarray(rgba, "RGBA").save(folder / "render.png")
+        svg = K.text_svg(P)
+        (folder / "asset.svg").write_text(svg, encoding="utf-8")
+        fid = K.evaluate_rgba(rgba, ref)
+        svg_c = R.svg_mask(svg, 1920, 1080)
+        hi = float(np.maximum(svg_c, rgba[..., 3] / 255.0).sum())
+        fid["svg_vs_render_iou"] = round(float(np.minimum(svg_c, rgba[..., 3] / 255.0).sum()) / hi, 5) if hi else None
+        fid["fit_history"] = p["fit_history"]
+        fid["date"] = "12 October 2026"
+        (folder / "fidelity.json").write_text(json.dumps(fid, indent=1))
+        return {"id": m["id"], "version": folder.name, "font": Path(font_file).name,
+                **{k: fid[k] for k in ("iou_soft", "iou_hard", "edge_mean_px", "dE2000_band_mean", "match", "svg_vs_render_iou")}}
+    except Exception as e:
+        import traceback
+        return {"id": m["id"], "error": repr(e), "trace": traceback.format_exc()[-800:]}
+
+
+def cmd_fit(a):
+    axes = json.loads(a.axes) if a.axes else None
+    fit_axes = a.fit_axes.split(",") if a.fit_axes else None
+    jobs = [(a.slug, m, a.file, fit_axes, axes, a.note, a.cont) for m in _marks(a.slug, a.ids) if m["kind"] == "text"]
+    with ProcessPoolExecutor(settings.get("vector.marks.workers")) as pool:
+        for r in pool.map(_fit_one, jobs):
+            print(json.dumps(r), flush=True)
+
+
+def cmd_svg(a):
+    """Trace each svg mark with zrmd.vector.asset (primitives first, free paths otherwise) as a private 1:1 version
+    in motions/<prefix>-f3-<id>/V_NNN, then add the F3 mask and colour measures. 12 October 2026."""
+    from zrmd import versions as V
+    from zrmd.vector import asset as A
+    for m in _marks(a.slug, a.ids):
+        if m["kind"] != "svg" and not a.trace_text:
+            continue
+        d = K.mark_cache(a.slug, m["id"])
+        rgb = np.asarray(Image.open(d / "crop.png").convert("RGB"))
+        info = json.loads((d / "frame.json").read_text())
+        src = {"kind": "reference-crop", "slug": a.slug, "time_s": info["time_s"], "region": m["region"],
+               "placement_px": m["region"][:2], "canvas": [1920, 1080]}
+        res = A.vectorise(rgb, f"{a.slug}-{m['id']}", source=src)
+        P = res["params"]
+        P["mark"] = m["id"]
+        P["family"] = m["family"]
+        fid = A.evaluate(P, rgb, res["analysis"])
+        md = K.motion_dir(a.slug, m["id"])
+        folder = A.write_version(md, P, rgb, fid, parent=V.latest_version(md), note=a.note)
+        mo = V.read_json(md / "motion.json", {}) or {}
+        mo["latest"] = folder.name
+        mo.setdefault("versions", []).append(folder.name)
+        mo["updated"] = V.today()
+        V.write_json(md / "motion.json", mo)
+        out = np.asarray(Image.open(folder / "render.png").convert("RGB")).astype(np.float32)
+        f3 = K.svg_fidelity(rgb.astype(np.float32), out)
+        fid["f3"] = f3
+        (folder / "fidelity.json").write_text(json.dumps(fid, indent=1))
+        print(json.dumps({"id": m["id"], "version": folder.name, "kinds": [l["kind"] for l in P["layers"]],
+                          "min_layer_iou": fid.get("min_iou"), **f3}), flush=True)
+
+
+def _parse_set(items):
+    out = {}
+    for it in items or []:
+        k, v = it.split("=", 1)
+        try:
+            out[k] = json.loads(v)
+        except json.JSONDecodeError:
+            out[k] = v
+    return out
+
+
+def cmd_vary(a):
+    """Variation by parameters only (12 October 2026): copy a version's params, apply --set dotted=value, cook a new
+    version. A text change drops the per-glyph deltas (they belong to the glyphs of the original string). The
+    variation keeps rights private-1to1 until rights are validated; its check is that the cooked mask differs
+    from the parent while the untouched parameters are identical."""
+    from zrmd import versions as V
+    from zrmd.vector import asset as A, render as R
+    md = K.motion_dir(a.slug, a.id)
+    src = a.src or V.latest_version(md)
+    P = json.loads((md / src / "params.json").read_text())
+    sets = _parse_set(a.set)
+    P2 = json.loads(json.dumps(P))
+    for k, v in sets.items():
+        V.set_path(P2, k, v)
+    if P.get("kind") == "text":
+        if "text" in sets:
+            P2["deltas_px"] = None
+        P2["variation_of"] = src
+        folder = V.create_version(md, P2, note=f"variation of {src}: {sets}")
+        rgba = K.cook_text(P2)
+        Image.fromarray(rgba, "RGBA").save(folder / "render.png")
+        (folder / "asset.svg").write_text(K.text_svg(P2), encoding="utf-8")
+        parent = np.asarray(Image.open(md / src / "render.png"))
+        a0, a1 = parent[..., 3] / 255.0, rgba[..., 3] / 255.0
+        hi = float(np.maximum(a0, a1).sum())
+        check = {"variation_of": src, "set": sets, "iou_vs_parent": round(float(np.minimum(a0, a1).sum()) / hi, 5) if hi else None,
+                 "colour_parent": P["colour"], "colour": P2["colour"],
+                 "changed": bool(not np.array_equal(parent, rgba)), "date": "12 October 2026"}
+    else:
+        ov = {"palette": {k.split(".", 1)[1]: v for k, v in sets.items() if k.startswith("palette.")}}
+        P2 = A.apply_overrides(P, ov)
+        P2["variation_of"] = src
+        folder = A.write_version(md, P2, None, None, parent=src, note=f"variation of {src}: {sets}")
+        mo = V.read_json(md / "motion.json", {}) or {}
+        mo["latest"] = folder.name
+        mo.setdefault("versions", []).append(folder.name)
+        V.write_json(md / "motion.json", mo)
+        r0 = np.asarray(Image.open(md / src / "render.png").convert("RGB"))
+        r1 = np.asarray(Image.open(folder / "render.png").convert("RGB"))
+        check = {"variation_of": src, "set": sets, "changed": bool(not np.array_equal(r0, r1)),
+                 "mean_abs_change": round(float(np.abs(r0.astype(float) - r1).mean()), 3), "date": "12 October 2026"}
+    (folder / "variation.json").write_text(json.dumps(check, indent=1))
+    print(json.dumps({"id": a.id, "version": folder.name, **check}))
+
+
+def cmd_table(a):
+    """Best version per mark (by mask IoU) and every variation, as JSON lines for the report. 12 October 2026."""
+    from zrmd import versions as V
+    rows = []
+    for m in _marks(a.slug, a.ids):
+        md = K.motion_dir(a.slug, m["id"])
+        best, n = None, 0
+        for v in V.list_versions(md):
+            f = V.read_json(md / v / "fidelity.json")
+            if not f:
+                continue
+            n += 1
+            g = f.get("f3", f)
+            key = (g.get("iou_hard") or 0, g.get("iou_soft") or 0)
+            if best is None or key > best[0]:
+                P = V.read_json(md / v / "params.json") or {}
+                best = (key, v, g, P)
+        vars_ = [v for v in V.list_versions(md) if (md / v / "variation.json").exists()]
+        if best:
+            _, v, g, P = best
+            rows.append({"id": m["id"], "kind": m["kind"], "family": m["family"], "text": m.get("text"), "best": v,
+                         "fitted_versions": n, "font": (P.get("font") or {}).get("family"),
+                         "wght": round(((P.get("font") or {}).get("axes") or {}).get("wght", 0) or 0, 1) or None,
+                         "size_px": P.get("size_px"), "iou_hard": g.get("iou_hard"), "iou_soft": g.get("iou_soft"),
+                         "edge_mean_px": g.get("edge_mean_px"), "dE2000": g.get("dE2000_band_mean"),
+                         "match": g.get("match"), "variations": vars_, "dir": str(md)})
+        else:
+            rows.append({"id": m["id"], "kind": m["kind"], "missing": True})
+    for r in rows:
+        print(json.dumps(r))
+
+
+def _create_one(job):
+    """Font creator (F1, zrmd.vector.fontcreate) on one mark, started from the mark's best fitted version, with the
+    fitted optical blur carried in layout.blur_px (F3 extension); the built font is then refitted by the marks
+    loop and written as the next mark version. 12 October 2026."""
+    slug, m, src, enable, note = job
+    import time
+    from zrmd import versions as V
+    from zrmd.vector import fontcreate as FC, fontfit as FF
+    try:
+        t0 = time.time()
+        md = K.motion_dir(slug, m["id"])
+        P0 = json.loads((md / src / "params.json").read_text())
+        ref = K.reference_of(slug, m)
+        lp = K.line_params(P0)
+        origin = [lp["origin"][0] - ref["offset"][0], lp["origin"][1] - ref["offset"][1]]
+        fit = {"family": P0["font"]["family"],
+               "params": {"file": lp["file"], "axes": lp["axes"], "size": lp["size"], "origin": origin,
+                          "tracking_em": lp["tracking_em"], "deltas": lp["deltas"], "blur_px": lp["blur_px"]}}
+        target = ref["c"] * ref["weight"]
+        fid = f"{slug.split('-')[0]}-f3-{m['id']}"
+        root = Path(settings.get("vector.create.out_dir")) / fid
+        work = root / "_work" / src
+        base_cfg = FC._cfg()
+        over = {k: v for k, v in (settings.get("vector.marks.create_overrides") or {}).items() if not k.startswith("_")}
+        FC._cfg = lambda: {**base_cfg, **over}          # F3 overrides for this worker only (12 October 2026)
+        r = FC.fit_font(target, m["text"], fit, work, enable=enable)
+        name = V.next_version(root)
+        vdir = root / name
+        vdir.mkdir(parents=True, exist_ok=False)
+        built = FC.build_font(r["params"], vdir / "font.ttf", f"ZRMD {fid} {name}")
+        (vdir / "params.json").write_text(json.dumps(r["params"], indent=1, ensure_ascii=False))
+        canvas = (target.shape[1], target.shape[0])
+        sc = FF.score(target, FC.render_built(built["file"], r["params"], canvas))
+        (vdir / "fit.json").write_text(json.dumps({"date": "12 October 2026", "mark": m["id"], "from_mark_version": src,
+                                                    "build": built, "score_built": sc, "trace": r["trace"],
+                                                    "private": True, "rights": "private-1to1",
+                                                    "seconds": round(time.time() - t0, 1)}, indent=1, default=str))
+        L = r["params"]["layout"]
+        start = {"text": m["text"], "file": built["file"], "axes": {}, "size": L["size"], "origin": list(L["origin"]),
+                 "tracking_em": L["tracking_em"], "deltas": L.get("deltas"), "blur_px": L.get("blur_px", 0.0)}
+        return {"id": m["id"], "font": built["file"], "start": start, "score_built": sc, "seconds": round(time.time() - t0, 1)}
+    except Exception as e:
+        import traceback
+        return {"id": m["id"], "error": repr(e), "trace": traceback.format_exc()[-1200:]}
+
+
+def cmd_create(a):
+    from zrmd import versions as V
+    jobs = []
+    for m in _marks(a.slug, a.ids):
+        if m["kind"] != "text":
+            continue
+        md = K.motion_dir(a.slug, m["id"])
+        best = None
+        for v in V.list_versions(md):
+            f = V.read_json(md / v / "fidelity.json") or {}
+            P = V.read_json(md / v / "params.json") or {}
+            # 12 October 2026: a created font is a valid start too (static glyf font), so creation chains version
+            # after version, each run restarting the edge snapping from the previous outlines.
+            if "font" in P and f.get("iou_soft") is not None and not (md / v / "variation.json").exists():
+                if best is None or f["iou_soft"] > best[0]:
+                    best = (f["iou_soft"], v)
+        if best:
+            jobs.append((a.slug, m, best[1], {"axes": False}, a.note))
+    with ProcessPoolExecutor(min(settings.get("vector.marks.workers"), max(1, len(jobs)))) as pool:
+        outs = list(pool.map(_create_one, jobs))
+    fit_jobs, by_id = [], {}
+    for o in outs:
+        if "error" in o:
+            print(json.dumps(o), flush=True)
+            continue
+        m = next(x for x in _marks(a.slug, [o["id"]]))
+        by_id[o["id"]] = o
+        fit_jobs.append((a.slug, m, o["font"], [], {}, f"{a.note}; created font {Path(o['font']).parent.name}", False,
+                         o["start"]))
+    with ProcessPoolExecutor(settings.get("vector.marks.workers")) as pool:
+        for r in pool.map(_fit_one, fit_jobs):
+            o = by_id.get(r["id"], {})
+            r["score_built_creator"] = o.get("score_built")
+            r["creator_seconds"] = o.get("seconds")
+            print(json.dumps(r), flush=True)
+
+
+def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--slug", default="onekey-pro-2")
+    sub = ap.add_subparsers(dest="cmd", required=True)
+    for name in ("extract", "coverage"):
+        s = sub.add_parser(name)
+        s.add_argument("ids", nargs="*")
+    s = sub.add_parser("fit")
+    s.add_argument("ids", nargs="*")
+    s.add_argument("--file", required=True, help="font file (datasets/fonts/... or a created font)")
+    s.add_argument("--fit-axes", default=None, help="comma list of axes to fit (default settings)")
+    s.add_argument("--axes", default=None, help="JSON start axes")
+    s.add_argument("--note", default="F3 fit")
+    s.add_argument("--cont", action="store_true", help="start from the latest version of the same font")
+    s = sub.add_parser("svg")
+    s.add_argument("ids", nargs="*")
+    s.add_argument("--trace-text", action="store_true",
+                   help="also trace text marks as free SVG paths (12 October 2026: route past the font outlines)")
+    s.add_argument("--note", default="F3 trace, private 1:1")
+    s = sub.add_parser("vary")
+    s.add_argument("id")
+    s.add_argument("--src", default=None, help="source version (default latest)")
+    s.add_argument("--set", nargs="+", help="dotted=value (JSON values), for example colour='\"#ff6a2b\"'")
+    s = sub.add_parser("create")
+    s.add_argument("ids", nargs="*")
+    s.add_argument("--note", default="F3 created font")
+    s = sub.add_parser("table")
+    s.add_argument("ids", nargs="*")
+    a = ap.parse_args()
+    {"extract": cmd_extract, "coverage": cmd_coverage, "fit": cmd_fit, "svg": cmd_svg, "vary": cmd_vary,
+     "table": cmd_table, "create": cmd_create}[a.cmd](a)
+
+
+if __name__ == "__main__":
+    main()

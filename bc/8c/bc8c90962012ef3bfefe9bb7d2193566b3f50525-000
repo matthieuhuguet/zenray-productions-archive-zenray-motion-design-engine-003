@@ -1,0 +1,95 @@
+{
+  "id": "paper_rustle",
+  "family": "foley",
+  "description": "Paper rustle: band-passed noise with attack and decay, modulated by a crinkle signal (fixed sum of sines through a sigmoid). (12 October 2026)",
+  "tags": [
+    "foley",
+    "paper",
+    "rustle",
+    "crinkle",
+    "noise"
+  ],
+  "sources": [
+    {
+      "what": "deterministic amplitude modulation of filtered noise",
+      "url": null,
+      "licence": "original (derived from the mathematics, no code copied)"
+    }
+  ],
+  "licence": "original",
+  "params": [
+    {
+      "name": "center_hz",
+      "unit": "Hz",
+      "min": 800.0,
+      "max": 12000.0,
+      "default": 4000.0,
+      "scale": "log",
+      "description": "band centre"
+    },
+    {
+      "name": "bw_oct",
+      "unit": "octaves",
+      "min": 0.5,
+      "max": 5.0,
+      "default": 2.5,
+      "scale": "log",
+      "description": "band width"
+    },
+    {
+      "name": "crinkle_hz",
+      "unit": "Hz",
+      "min": 3.0,
+      "max": 60.0,
+      "default": 15.0,
+      "scale": "log",
+      "description": "mean crinkle rate"
+    },
+    {
+      "name": "depth",
+      "unit": "0..1",
+      "min": 0.0,
+      "max": 1.0,
+      "default": 0.7,
+      "scale": "lin",
+      "description": "crinkle modulation depth"
+    },
+    {
+      "name": "duration_s",
+      "unit": "s (T60)",
+      "min": 0.1,
+      "max": 3.0,
+      "default": 0.8,
+      "scale": "log",
+      "description": "time to fall 60 dB"
+    },
+    {
+      "name": "attack_s",
+      "unit": "s",
+      "min": 0.002,
+      "max": 0.2,
+      "default": 0.03,
+      "scale": "log",
+      "description": "linear attack"
+    },
+    {
+      "name": "amp_db",
+      "unit": "dBFS",
+      "min": -60.0,
+      "max": 0.0,
+      "default": -14.0,
+      "scale": "lin",
+      "description": "peak level of the main layer"
+    },
+    {
+      "name": "onset_s",
+      "unit": "s",
+      "min": 0.0,
+      "max": 0.2,
+      "default": 0.02,
+      "scale": "lin",
+      "description": "start time in the window"
+    }
+  ],
+  "date": "12 October 2026"
+}
